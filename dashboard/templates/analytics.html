@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}Analytics — SmartPark{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1 class="page-title">📈 Analytics & Reports</h1>
+    <p class="page-subtitle">Occupancy · Revenue · Peak Hours · Users Today</p></div>
+  <a href="{{ url_for('admin_dashboard') }}" class="btn-secondary">← Dashboard</a>
+</div>
+
+<!-- Summary Cards — now includes TODAY stats -->
+<div class="stats-grid">
+  <div class="stat-card stat-total">
+    <div class="stat-icon">🚗</div>
+    <div class="stat-body"><div class="stat-value">{{ summary.total_sessions }}</div><div class="stat-label">Total Sessions</div></div>
+  </div>
+  <!-- NEW: Users arrived today -->
+  <!-- NEW: Revenue today -->
+  <div class="stat-card" style="border-left:3px solid #10b981">
+    <div class="stat-icon">💵</div>
+    <div class="stat-body"><div class="stat-value" style="color:#10b981">₹{{ "%.0f"|format(summary.revenue_today) }}</div><div class="stat-label">Revenue Today</div></div>
+  </div>
+  <div class="stat-card stat-pct">
+    <div class="stat-icon">⏱</div>
+    <div class="stat-body"><div class="stat-value">{{ summary.avg_duration_min }} min</div><div class="stat-label">Avg Duration</div></div>
+  </div>
+  <div class="stat-card stat-free">
+    <div class="stat-icon">🏆</div>
+    <div class="stat-body"><div class="stat-value" style="font-size:14px">{{ summary.busiest_zone }}</div><div class="stat-label">Busiest Zone</div></div>
+  </div>
+</div>
+
+<!-- Prediction -->
+<div class="prediction-banner">
+  <div class="prediction-icon">🔮</div>
+  <div>
+    <div class="prediction-title">Predicted Peak Hour Today</div>
+    <div class="prediction-value">{{ prediction.predicted_label }}</div>
+    <div class="prediction-note">{{ prediction.method }}</div>
+  </div>
+</div>
+
+<!-- Occupancy forecast (linear regression) -->
+<div class="prediction-banner">
+  <div class="prediction-icon">📈</div>
+  <div>
+    <div class="prediction-title">Predicted Occupancy — Next Hour</div>
+    <div class="prediction-value">
+      {% if occ_prediction.predicted_occupancy is not none %}
+        {{ occ_prediction.predicted_occupancy }}% <span style="font-size:12px;font-weight:600;color:#94a3b8;">({{ occ_prediction.trend }})</span>
+      {% else %}
+        Gathering data...
+      {% endif %}
+    </div>
+    <div class="prediction-note">{{ occ_prediction.method }}</div>
+  </div>
+</div>
+
+<!-- Revenue Bar Chart — PROMINENT -->
+<div class="card">
+  <div class="card-header">
+    <h2>💹 Revenue — Last 7 Days</h2>
+    <span style="font-size:12px;color:#64748b">Bar chart · Updates with each session</span>
+  </div>
+  <canvas id="revenueChart" height="80"></canvas>
+</div>
+
+<!-- Charts Row 2 -->
+<div class="charts-grid">
+  <div class="card chart-card">
+    <div class="card-header"><h2>📉 Occupancy Trend (12 Hours)</h2></div>
+    <canvas id="occupancyChart" height="200"></canvas>
+  </div>
+  <div class="card chart-card">
+    <div class="card-header"><h2>🕐 Peak Hours Analysis</h2></div>
+    <canvas id="peakChart" height="200"></canvas>
+  </div>
+</div>
+
+<!-- Session History -->
+<div class="card">
+  <div class="card-header"><h2>📋 Session History</h2></div>
+  <form method="GET" action="{{ url_for('admin_analytics') }}" class="filter-form">
+    <input type="text" name="plate" placeholder="Search plate (e.g. TS09)" value="{{ search_plate }}">
+    <input type="date" name="date" value="{{ search_date }}">
+    <select name="zone">
+      <option value="">All Zones</option>
+      <option value="A" {% if search_zone=='A' %}selected{% endif %}>Zone A — Two Wheelers</option>
+      <option value="B" {% if search_zone=='B' %}selected{% endif %}>Zone B — Four Wheelers</option>
+      <option value="C" {% if search_zone=='C' %}selected{% endif %}>Zone C — EV Cars</option>
+      <option value="D" {% if search_zone=='D' %}selected{% endif %}>Zone D — Heavy</option>
+    </select>
+    <button type="submit" class="btn-primary">Filter</button>
+    <a href="{{ url_for('admin_analytics') }}" class="btn-secondary">Clear</a>
+  </form>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead><tr>
+        <th>#</th><th>Plate</th><th>Type</th><th>Zone</th><th>User</th>
+        <th>Entry</th><th>Exit</th><th>Duration</th><th>Amount</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        {% for h in history %}
+        {% set hvi = vehicle_info.get(h.vehicle_type, {'icon':'🚗','label':'Car'}) %}
+        <tr>
+          <td><code>#{{ h.id }}</code></td>
+          <td><span class="plate-badge">{{ h.vehicle_plate }}</span></td>
+          <td><span class="vtype-pill vtp-{{ h.vehicle_type }}">{{ hvi.icon }} {{ hvi.label }}</span></td>
+          <td>{{ h.zone_label or h.zone }}</td>
+          <td>{{ h.user_name or 'Walk-in' }}</td>
+          <td>{{ h.entry_time }}</td>
+          <td>{{ h.exit_time or '—' }}</td>
+          <td>{% if h.duration_minutes %}{{ h.duration_minutes }} min{% else %}—{% endif %}</td>
+          <td>{% if h.amount %}<strong>₹{{ "%.0f"|format(h.amount) }}</strong>{% else %}—{% endif %}</td>
+          <td><span class="status-badge status-{{ h.status }}">{{ h.status }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty-state">No records found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- FEATURE: ZONE WISE REVENUE CHART -->
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-header"><h2>🏆 Zone Wise Revenue</h2></div>
+  <div style="padding:16px;">
+    <canvas id="zoneRevenueChart" height="80"></canvas>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const occData  = {{ occ_trend  | tojson }};
+const revData  = {{ rev_trend  | tojson }};
+const peakData = {{ peak_hours | tojson }};
+
+const maxRev = Math.max(...revData.data, 50);
+const revMax = Math.ceil(maxRev * 1.3 / 10) * 10;
+const co = {
+  responsive: true,
+  maintainAspectRatio: true,
+  plugins: { legend: { labels: { color:'#94a3b8', font:{family:'Inter'} } } },
+  scales: {
+    x: { ticks:{color:'#64748b'}, grid:{color:'#1e2a3a'} },
+    y: { beginAtZero: true, max: revMax,
+         ticks:{color:'#64748b', callback: v => '₹'+v, maxTicksLimit: 6},
+         grid:{color:'#1e2a3a'} }
+  }
+};
+
+// Revenue Bar — prominent and large
+new Chart('revenueChart', {type:'bar', data:{
+  labels: revData.labels,
+  datasets:[{
+    label:'Revenue (₹)', data: revData.data,
+    backgroundColor: revData.data.map((v,i) =>
+      i===revData.data.length-1 ? 'rgba(0,212,170,.85)' : 'rgba(99,102,241,.7)'),
+    borderColor: revData.data.map((v,i) =>
+      i===revData.data.length-1 ? '#00d4aa' : '#6366f1'),
+    borderWidth: 1, borderRadius: 8
+  }]
+}, options: {...co,
+  plugins:{...co.plugins,
+    tooltip:{callbacks:{label: ctx => ` ₹${ctx.raw.toFixed(0)}`}}
+  }
+}});
+
+// Occupancy Line
+new Chart('occupancyChart', {type:'line', data:{
+  labels: occData.labels,
+  datasets:[{label:'Occupancy %', data:occData.data,
+    borderColor:'#00d4aa', backgroundColor:'rgba(0,212,170,.1)',
+    fill:true, tension:.4, borderWidth:2, pointBackgroundColor:'#00d4aa'}]
+}, options:{...co, scales:{...co.scales,
+  y:{...co.scales.y, min:0, max:100,
+     ticks:{color:'#64748b', callback:v=>v+'%'}}}}});
+
+// Peak Hours Bar
+new Chart('peakChart', {type:'bar', data:{
+  labels: peakData.labels,
+  datasets:[{label:'Vehicle Entries', data:peakData.data,
+    backgroundColor: peakData.data.map(v =>
+      v===Math.max(...peakData.data)?'rgba(239,68,68,.8)':'rgba(251,146,60,.55)'),
+    borderRadius:5}]
+}, options:co});
+
+// FEATURE: ZONE WISE REVENUE CHART
+fetch('/api/zone_revenue')
+  .then(r => r.json())
+  .then(d => {
+    const zones = d.zones;
+    const colors = ['#06b6d4','#10b981','#818cf8','#8b5cf6','#f59e0b'];
+    new Chart(document.getElementById('zoneRevenueChart'), {
+      type: 'bar',
+      data: {
+        labels: zones.map(z => z.zone_label),
+        datasets: [{
+          label: 'Revenue (₹)',
+          data: zones.map(z => z.revenue),
+          backgroundColor: colors,
+          borderRadius: 8,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {display: false},
+          tooltip: {callbacks: {label: ctx => '₹' + ctx.parsed.y}}
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: Math.ceil(Math.max(...zones.map(z=>z.revenue), 50) * 1.3 / 10) * 10,
+            ticks: {
+              color:'#94a3b8',
+              callback: v => '₹' + v,
+              maxTicksLimit: 6
+            },
+            grid: {color:'rgba(255,255,255,0.05)'}
+          },
+          x: {ticks: {color:'#94a3b8'}, grid: {display:false}}
+        }
+      }
+    });
+  });
+</script>
+{% endblock %}

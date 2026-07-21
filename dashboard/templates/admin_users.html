@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}User Management — SmartPark{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1 class="page-title">👥 User Management</h1>
+    <p class="page-subtitle">{{ users|length }} registered users</p></div>
+  <a href="{{ url_for('admin_dashboard') }}" class="btn-secondary">← Dashboard</a>
+</div>
+<div class="card">
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead><tr>
+        <th>ID</th><th>Name</th><th>Email</th><th>Phone</th>
+        <th>Plate</th><th>Vehicle Type</th><th>Role</th><th>Registered</th>
+      </tr></thead>
+      <tbody>
+        {% for u in users %}
+        {% set vi = vehicle_info.get(u.vehicle_type or 'car', {'icon':'🚗','label':'Car'}) %}
+        <tr>
+          <td><code>#{{ u.id }}</code></td>
+          <td>{{ u.name }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ u.phone or '—' }}</td>
+          <td>{% if u.vehicle_plate %}<span class="plate-badge">{{ u.vehicle_plate }}</span>{% else %}—{% endif %}</td>
+          <td><span class="vtype-pill vtp-{{ u.vehicle_type or 'car' }}">{{ vi.icon }} {{ vi.label }}</span></td>
+          <td><span class="status-badge status-{{ u.role }}">{{ u.role }}</span></td>
+          <td>{{ u.created_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

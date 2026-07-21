@@ -1,0 +1,1051 @@
+{% extends "base.html" %}
+{% block title %}My Parking — SmartPark{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Welcome, {{ user.name }} 👋</h1>
+    <p class="page-subtitle">Select your vehicle below — sensors auto-allocate your zone</p>
+  </div>
+  <div class="header-actions">
+    <a href="/user/history" class="history-link-btn">📋 My Parking History</a>
+    <div class="live-indicator"><span class="pulse-dot"></span> LIVE</div>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid">
+  <div class="stat-card stat-free">
+    <div class="stat-icon">🟢</div>
+    <div class="stat-body"><div class="stat-value" id="stat-free">{{ stats.free }}</div><div class="stat-label">Available</div></div>
+  </div>
+  <div class="stat-card stat-occupied">
+    <div class="stat-icon">🔴</div>
+    <div class="stat-body"><div class="stat-value" id="stat-occupied">{{ stats.occupied }}</div><div class="stat-label">Occupied</div></div>
+  </div>
+  <div class="stat-card stat-reserved">
+    <div class="stat-icon">🟡</div>
+    <div class="stat-body"><div class="stat-value" id="stat-reserved">{{ stats.reserved }}</div><div class="stat-label">Reserved</div></div>
+  </div>
+  <div class="stat-card stat-pct">
+    <div class="stat-icon">📊</div>
+    <div class="stat-body"><div class="stat-value" id="stat-pct">{{ stats.occupancy_pct }}%</div><div class="stat-label">Occupancy</div></div>
+  </div>
+  <div class="stat-card stat-total">
+    <div class="stat-icon">📋</div>
+    <div class="stat-body"><div class="stat-value">{{ history|length }}</div><div class="stat-label">My Sessions</div></div>
+  </div>
+</div>
+
+
+<!-- FEATURE: LIVE SLOT MAP -->
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <h2>🗺️ Live Slot Map</h2>
+    <span style="font-size:12px;color:#64748b;">Auto-refreshes every 10s &nbsp;|&nbsp; 🟢 Free &nbsp; 🔴 Occupied &nbsp; 🟡 Reserved</span>
+  </div>
+  <div class="slot-map-grid" id="live-slot-map">
+    {% for slot in slots %}
+    <div class="slot-cell slot-{{ slot.status }}" title="Slot {{ slot.slot_number }} | {{ slot.zone_label }} | {{ slot.status|upper }}">
+      <span class="slot-num">{{ slot.slot_number }}</span>
+      <span class="slot-ico">{% if slot.status == 'free' %}🟢{% elif slot.status == 'occupied' %}🔴{% else %}🟡{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+
+<!-- FEATURE: ESTIMATED BILL PREVIEW -->
+<div class="card" id="estimated-bill-card" style="margin-bottom:16px;display:none;">
+  <div class="card-header"><h2>🧾 Estimated Bill Preview</h2></div>
+  <div style="padding:16px;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <select id="est-vtype" onchange="updateEstimate()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#e2e8f0;font-size:13px;outline:none;">
+        <option value="bike">🏍 Bike</option>
+        <option value="scooty">🛵 Scooty</option>
+        <option value="auto">🛺 Auto-Rickshaw</option>
+        <option value="car">🚗 Car</option>
+        <option value="ev">🔋 EV Car</option>
+        <option value="heavy">🚛 Heavy Vehicle</option>
+      </select>
+      <select id="est-duration" onchange="updateEstimate()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#e2e8f0;font-size:13px;outline:none;">
+        <option value="30">30 minutes</option>
+        <option value="60" selected>1 hour</option>
+        <option value="120">2 hours</option>
+        <option value="180">3 hours</option>
+        <option value="240">4 hours</option>
+        <option value="300">5 hours</option>
+      </select>
+      <div style="background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);border-radius:10px;padding:10px 20px;text-align:center;">
+        <div style="font-size:11px;color:#64748b;">Estimated Cost</div>
+        <div style="font-size:24px;font-weight:800;color:#00d4aa;" id="est-amount">₹20</div>
+      </div>
+    </div>
+    <p style="font-size:11px;color:#64748b;margin-top:8px;">* Estimate based on selected vehicle type and duration. Actual bill may vary.</p>
+  </div>
+</div>
+
+<!-- ══ MODE TOGGLE — Park Now (offline) vs Book in Advance (online) ══ -->
+{% if not active_sessions %}
+<div class="parking-mode-toggle">
+  <button class="pmt-btn active" id="pmt-now" onclick="switchParkingMode('now')">
+    🚦 Park Now <span class="pmt-sub">Walk-in, instant</span>
+  </button>
+  <button class="pmt-btn" id="pmt-advance" onclick="switchParkingMode('advance')">
+    📅 Book in Advance <span class="pmt-sub">Reserve a future time slot</span>
+  </button>
+</div>
+{% endif %}
+
+<!-- ══ VEHICLE SELECTION — Main action when not parked ══ -->
+{% if not active_sessions %}
+<div class="card vt-select-card" id="park-now-panel">
+  <div class="card-header">
+    <h2>🚦 Select Your Vehicle & Park</h2>
+    <span style="font-size:11px;color:#64748b">Click your vehicle → sensors detect → slot allocated automatically</span>
+  </div>
+
+  <!-- 6 large vehicle type cards (rate + zone already shown on each card, so the
+       separate "Parking Charges" summary block above was a duplicate and has been removed) -->
+  <div class="vt-select-grid">
+
+    <div class="vt-big-card" style="--vc:#06b6d4" onclick="mySimulateArrive('bike')" id="vtcard-bike">
+      <div class="vtbc-icon">🏍</div>
+      <div class="vtbc-name">Bike</div>
+      <div class="vtbc-zone">Zone A · Slots 1–10</div>
+      <div class="vtbc-rate">₹10 / first hr</div>
+      <div class="vtbc-free" id="vtf-bike">
+        {{ zone_stats[0].free if zone_stats else '—' }} free
+      </div>
+      <div class="vtbc-btn">Park Here →</div>
+    </div>
+
+    <div class="vt-big-card" style="--vc:#06b6d4" onclick="mySimulateArrive('scooty')" id="vtcard-scooty">
+      <div class="vtbc-icon">🛵</div>
+      <div class="vtbc-name">Scooty</div>
+      <div class="vtbc-zone">Zone A · Slots 1–10</div>
+      <div class="vtbc-rate">₹10 / first hr</div>
+      <div class="vtbc-free" id="vtf-scooty">
+        {{ zone_stats[0].free if zone_stats else '—' }} free
+      </div>
+      <div class="vtbc-btn">Park Here →</div>
+    </div>
+
+    <div class="vt-big-card" style="--vc:#10b981" onclick="mySimulateArrive('auto')" id="vtcard-auto">
+      <div class="vtbc-icon">🛺</div>
+      <div class="vtbc-name">Auto-Rickshaw</div>
+      <div class="vtbc-zone">Zone B · Slots 11–14</div>
+      <div class="vtbc-rate">₹15 / first hr</div>
+      <div class="vtbc-free" id="vtf-auto">
+        {{ zone_stats[1].free if zone_stats|length > 1 else '—' }} free
+      </div>
+      <div class="vtbc-btn">Park Here →</div>
+    </div>
+
+    <div class="vt-big-card" style="--vc:#10b981" onclick="mySimulateArrive('car')" id="vtcard-car">
+      <div class="vtbc-icon">🚗</div>
+      <div class="vtbc-name">Car</div>
+      <div class="vtbc-zone">Zone C · Slots 15–26</div>
+      <div class="vtbc-rate">₹20 / first hr</div>
+      <div class="vtbc-free" id="vtf-car">
+        {{ zone_stats[2].free if zone_stats|length > 2 else '—' }} free
+      </div>
+      <div class="vtbc-btn">Park Here →</div>
+    </div>
+
+    <div class="vt-big-card vt-ev-card" style="--vc:#8b5cf6" onclick="mySimulateArrive('ev')" id="vtcard-ev">
+      <div class="vtbc-icon">🔋</div>
+      <div class="vtbc-name">EV Car</div>
+      <div class="vtbc-zone">Zone D · Slots 27–32</div>
+      <div class="vtbc-rate">₹25 / first hr</div>
+      <div class="vtbc-free" id="vtf-ev">
+        {{ zone_stats[3].free if zone_stats|length > 3 else '—' }} free
+      </div>
+      <div class="vtbc-ev-badge">⚡ Charging Available</div>
+      <div class="vtbc-btn">Park Here →</div>
+    </div>
+
+    <div class="vt-big-card" style="--vc:#f59e0b" onclick="mySimulateArrive('heavy')" id="vtcard-heavy">
+      <div class="vtbc-icon">🚛</div>
+      <div class="vtbc-name">Heavy Vehicle</div>
+      <div class="vtbc-zone">Zone E · Slots 33–36</div>
+      <div class="vtbc-rate">₹40 / first hr</div>
+      <div class="vtbc-free" id="vtf-heavy">
+        {{ zone_stats[4].free if zone_stats|length > 4 else '—' }} free
+      </div>
+      <div class="vtbc-btn">Park Here →</div>
+    </div>
+
+  </div>
+
+  <!-- Sensor info strip -->
+  <div class="sensor-flow-strip">
+    <div class="sfs-step"><span class="sfs-icon">📡</span><span>IR Gate<br>Detects Entry</span></div>
+    <div class="sfs-arrow">→</div>
+    <div class="sfs-step"><span class="sfs-icon">📷</span><span>RFID/ANPR<br>Reads Plate</span></div>
+    <div class="sfs-arrow">→</div>
+    <div class="sfs-step"><span class="sfs-icon">📏</span><span>Ultrasonic<br>Confirms Slot</span></div>
+    <div class="sfs-arrow">→</div>
+    <div class="sfs-step"><span class="sfs-icon">✅</span><span>Session<br>Starts</span></div>
+  </div>
+</div>
+
+<!-- ══ BOOK IN ADVANCE PANEL — Online booking, hidden by default ══ -->
+<div class="card vt-select-card" id="park-advance-panel" style="display:none">
+  <div class="card-header">
+    <h2>📅 Book a Slot in Advance</h2>
+    <span style="font-size:11px;color:#64748b">Reserve now, arrive later — slot held for {{ grace_minutes }} min grace period after start time</span>
+  </div>
+
+  <!-- Step 1: Search form -->
+  <div class="booking-search-form">
+    <div class="bsf-row">
+      <div class="bsf-field">
+        <label>Vehicle Type</label>
+        <select id="bk-vtype" class="bk-select" onchange="resetBookingResults()">
+          <option value="bike">🏍 Bike</option>
+          <option value="scooty">🛵 Scooty</option>
+          <option value="car" selected>🚗 Car</option>
+          <option value="auto">🛺 Auto-Rickshaw</option>
+          <option value="ev">🔋 EV Car</option>
+          <option value="heavy">🚛 Heavy Vehicle</option>
+        </select>
+      </div>
+      <div class="bsf-field">
+        <label>Date</label>
+        <input type="date" id="bk-date" class="bk-input">
+      </div>
+      <div class="bsf-field">
+        <label>Start Time</label>
+        <input type="time" id="bk-start" class="bk-input">
+      </div>
+      <div class="bsf-field">
+        <label>End Time</label>
+        <input type="time" id="bk-end" class="bk-input">
+      </div>
+    </div>
+    <button class="btn-primary" onclick="searchBookingSlots()" style="margin-top:10px">
+      🔍 Find Available Slots
+    </button>
+  </div>
+
+  <!-- Step 2: Results -->
+  <div id="booking-results" style="margin-top:16px"></div>
+</div>
+{% endif %}
+
+<!-- ══ MY UPCOMING BOOKINGS ══ -->
+{% set upcoming_bookings = bookings | selectattr('status','equalto','upcoming') | list %}
+{% if upcoming_bookings %}
+<div class="card booking-list-card">
+  <div class="card-header">
+    <h2>📅 My Upcoming Bookings <span class="badge">{{ upcoming_bookings|length }}</span></h2>
+  </div>
+  {% for b in upcoming_bookings %}
+  {% set bvi = vehicle_info.get(b.vehicle_type, {'icon':'🚗','label':'Car'}) %}
+  <div class="upcoming-booking-row">
+    <div class="ubr-left">
+      <span class="ubr-icon">{{ bvi.icon }}</span>
+      <div>
+        <div class="ubr-title">{{ b.zone_label }} · Slot #{{ b.slot_number }}</div>
+        <div class="ubr-sub">{{ b.booking_date }} · {{ b.start_time }} – {{ b.end_time }}
+          {% if b.vehicle_plate %} · {{ b.vehicle_plate }}{% endif %}</div>
+      </div>
+    </div>
+    <div class="ubr-right">
+      {% if b.arrival_check.can_arrive %}
+      <button class="btn-arrive-booking" onclick="arriveBooking({{ b.id }})">
+        ✅ I've Arrived
+      </button>
+      {% else %}
+      <span class="ubr-wait-note">{{ b.arrival_check.reason }}</span>
+      {% endif %}
+      <button class="btn-cancel-booking" onclick="cancelBooking({{ b.id }})">✕ Cancel</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Active Session Card -->
+{% if active_sessions %}
+<div class="card glow-card">
+  <div class="card-header">
+    <h2>⏱ Active Parking Session</h2>
+    <span class="badge badge-active">PARKED</span>
+  </div>
+  {% for s in active_sessions %}
+  {% set svi = vehicle_info.get(s.vehicle_type, {'icon':'🚗','label':'Car'}) %}
+  <div class="active-session-info">
+    <div class="session-detail"><span>Vehicle</span><strong class="plate-badge">{{ s.vehicle_plate }}</strong></div>
+    <div class="session-detail"><span>Type</span>
+      <strong><span class="vtype-pill vtp-{{ s.vehicle_type }}">{{ svi.icon }} {{ svi.label }}</span></strong>
+    </div>
+    <div class="session-detail"><span>Zone / Slot</span><strong>{{ s.zone_label or s.zone }} / #{{ s.slot_number }}</strong></div>
+    <div class="session-detail"><span>Entry Time</span><strong>{{ s.entry_time }}</strong></div>
+    <div class="session-detail"><span>Running Bill</span>
+      <strong class="live-bill-display" data-entry="{{ s.entry_time }}" data-vtype="{{ s.vehicle_type }}">Calculating...</strong>
+    </div>
+    <div class="session-detail"><span>Duration</span>
+      <strong class="timer-cell" data-entry="{{ s.entry_time }}">
+        <span class="timer big-timer">{{ s.elapsed_display }}</span>
+      </strong>
+    </div>
+  </div>
+  <div class="exit-action-row">
+    <button class="btn-exit-big" onclick="mySimulateExit({{ s.id }})">
+      🚦 Exit Parking &amp; Pay Bill
+    </button>
+    <p class="exit-note">Click when leaving — bill calculated instantly, then pay via UPI</p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Main Grid: Slot Map + Sensor Feed -->
+<div class="main-grid">
+  <div class="card slot-map-card">
+    <div class="card-header">
+      <h2>🗺 Live Parking Map</h2>
+      <div class="legend">
+        <span class="legend-item free">Free</span>
+        <span class="legend-item occupied">Occupied</span>
+        <span class="legend-item reserved">Reserved</span>
+      </div>
+    </div>
+    <div class="slot-map" id="slot-map">
+      {% for zone_code, zone_lbl, vtypes, count, css_class in zones %}
+      <div class="zone-section
+          {% if zone_code=='A' %}zone-tw{% elif zone_code=='B' %}zone-3w
+          {% elif zone_code=='C' %}zone-fw{% elif zone_code=='D' %}zone-ev{% else %}zone-hv{% endif %}">
+        <div class="zone-label-row">
+          <span class="zone-badge zone-badge-{% if zone_code=='A' %}tw{% elif zone_code=='B' %}3w{% elif zone_code=='C' %}fw{% elif zone_code=='D' %}ev{% else %}hv{% endif %}">
+            Zone {{ zone_code }}</span>
+          <span class="zone-desc">{{ zone_lbl }}</span>
+        </div>
+        <div class="zone-grid {% if count==12 %}zone-grid-12{% elif count==8 %}zone-grid-8{% else %}zone-grid-4{% endif %}">
+          {% for slot in slots if slot.zone == zone_code %}
+          <div class="slot-card
+              {% if zone_code=='D' %}slot-ev{% elif zone_code=='E' %}slot-heavy{% endif %}
+              slot-{{ slot.status }}" id="slot-{{ slot.id }}">
+            <div class="slot-number">{{ slot.slot_number }}</div>
+            <div class="slot-icon">
+              {% if slot.status=='occupied' %}
+                {% if slot.vehicle_type=='bike' %}🏍{% elif slot.vehicle_type=='scooty' %}🛵{% elif slot.vehicle_type=='auto' %}🛺{% elif slot.vehicle_type=='car' %}🚗{% elif slot.vehicle_type=='ev' %}🔋{% elif slot.vehicle_type=='heavy' %}🚛{% else %}🚗{% endif %}
+              {% elif slot.status=='reserved' %}🔖
+              {% else %}✓{% endif %}
+            </div>
+            {% if zone_code=='D' %}<div class="ev-charge-dot"></div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Live Sensor Feed -->
+  <div class="card sensor-feed-card">
+    <div class="card-header">
+      <h2>📡 Live Sensor Feed</h2>
+      <span class="pulse-dot"></span>
+    </div>
+    <div class="sensor-feed" id="sensor-feed">
+      {% for log in sensor_logs %}
+      <div class="sensor-entry sensor-{{ log.sensor_type|lower|replace('_','-') }}">
+        <div class="sensor-type-badge">{{ log.sensor_type }}</div>
+        <div class="sensor-reading">{{ log.reading_value }}</div>
+        <div class="sensor-time">{{ log.timestamp }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+
+
+<!-- ══ Payment Modal — FIXED: scrollable, Pay Now always visible ══ -->
+<div class="modal-overlay" id="pay-modal" style="display:none">
+  <div class="pay-modal-card">
+
+    <!-- Fixed header -->
+    <div class="pay-modal-header">
+      <h3 id="modal-title">🧾 Parking Bill & Payment</h3>
+      <button class="modal-close" onclick="closePayModal()">✕</button>
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="pay-modal-body">
+
+      <!-- Bill receipt -->
+      <div id="bill-section"></div>
+
+      <!-- Payment method tabs -->
+      <div class="pay-tabs" id="pay-tabs">
+        <button type="button" class="pay-tab-btn active" id="tab-btn-upi" onclick="selectPayMethod('upi')">📲 UPI</button>
+        <button type="button" class="pay-tab-btn" id="tab-btn-card" onclick="selectPayMethod('card')">💳 Card</button>
+        <button type="button" class="pay-tab-btn" id="tab-btn-cash" onclick="selectPayMethod('cash')">💵 Cash</button>
+      </div>
+
+      <!-- UPI section — always in DOM -->
+      <div id="upi-section" style="display:none">
+        <div class="upi-pay-section">
+          <div class="upi-header">
+            <span class="upi-icon">💳</span>
+            <div>
+              <div class="upi-title">Pay via UPI</div>
+              <div class="upi-sub">GPay · PhonePe · Paytm · Any UPI App</div>
+            </div>
+          </div>
+          <div class="upi-apps-row">
+            <button type="button" class="upi-app-btn" onclick="fillUpi('gpay')">🟢 GPay</button>
+            <button type="button" class="upi-app-btn" onclick="fillUpi('phonepe')">🟣 PhonePe</button>
+            <button type="button" class="upi-app-btn" onclick="fillUpi('paytm')">🔵 Paytm</button>
+          </div>
+          <div class="upi-input-wrap">
+            <label>Enter Your UPI ID</label>
+            <input type="text" id="upi-id-input"
+                   placeholder="yourname@okaxis  or  yourname@ybl"
+                   style="width:100%;padding:11px 13px;background:#0a0f1e;
+                          border:1px solid #1e2d45;border-radius:8px;
+                          color:#e2e8f0;font-size:13px;font-family:'Inter',sans-serif;
+                          margin-top:6px;outline:none;transition:.2s"
+                   onfocus="this.style.borderColor='#6366f1'"
+                   onblur="this.style.borderColor='#1e2d45'">
+            <div class="upi-hint">Format: name@bankname &nbsp;·&nbsp; e.g. ruchita@okaxis</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card section (Debit / Credit) — always in DOM -->
+      <div id="card-section" style="display:none">
+        <div class="card-pay-section">
+          <div class="upi-header">
+            <span class="upi-icon">💳</span>
+            <div>
+              <div class="upi-title">Pay via Card</div>
+              <div class="upi-sub">Debit or Credit · Visa · Mastercard · RuPay</div>
+            </div>
+          </div>
+          <div class="card-type-row">
+            <button type="button" class="card-type-btn active" id="card-type-debit" onclick="selectCardType('debit')">🏧 Debit Card</button>
+            <button type="button" class="card-type-btn" id="card-type-credit" onclick="selectCardType('credit')">💳 Credit Card</button>
+          </div>
+          <div class="card-field-wrap">
+            <label>Name on Card</label>
+            <input type="text" id="card-holder-input" placeholder="As printed on card" autocomplete="cc-name">
+          </div>
+          <div class="card-field-wrap">
+            <label>Card Number</label>
+            <input type="text" id="card-number-input" placeholder="1234 5678 9012 3456"
+                   maxlength="19" inputmode="numeric" autocomplete="cc-number">
+          </div>
+          <div class="card-field-row">
+            <div class="card-field-wrap">
+              <label>Expiry (MM/YY)</label>
+              <input type="text" id="card-expiry-input" placeholder="MM/YY" maxlength="5" autocomplete="cc-exp">
+            </div>
+            <div class="card-field-wrap">
+              <label>CVV</label>
+              <input type="password" id="card-cvv-input" placeholder="•••" maxlength="4" autocomplete="cc-csc">
+            </div>
+          </div>
+          <div class="upi-hint" style="margin-top:10px">🔒 Card details are validated locally for this demo and never stored — only a masked number is saved.</div>
+        </div>
+      </div>
+
+      <!-- Cash section — always in DOM -->
+      <div id="cash-section" style="display:none">
+        <div class="cash-pay-section">
+          <div class="cash-icon">💵</div>
+          <div class="cash-title">Pay with Cash</div>
+          <div class="cash-sub">Hand the exact amount to the gate attendant.<br>
+            Tap <strong>Confirm Cash Payment</strong> once collected to record the receipt.</div>
+        </div>
+      </div>
+
+      <!-- Processing -->
+      <div id="processing-section" style="display:none">
+        <div class="pay-processing">
+          <div class="pay-spinner"></div>
+          <div class="pay-proc-title" id="processing-title">Processing Payment...</div>
+          <div class="pay-proc-sub">Contacting gateway · Please wait</div>
+        </div>
+      </div>
+
+      <!-- Success -->
+      <div id="success-section" style="display:none">
+        <div class="pay-success">
+          <div class="pay-success-icon">✅</div>
+          <div class="pay-success-title">Payment Successful!</div>
+          <div class="pay-success-amt" id="success-amt"></div>
+          <div class="pay-success-details" id="success-details"></div>
+          <div class="pay-thank">🙏 Thank you for using SmartPark!</div>
+        </div>
+      </div>
+
+    </div><!-- end pay-modal-body -->
+
+    <!-- Fixed footer — Pay Now button ALWAYS visible here -->
+    <div class="pay-modal-footer" id="pay-modal-footer">
+      <button type="button" class="btn-pay-now" id="pay-now-btn" onclick="submitPayment()">
+        💳 Pay Now
+      </button>
+      <p style="text-align:center;font-size:10px;color:#64748b;margin-top:6px">
+        🔒 Secure Payment · Transaction ID generated on success
+      </p>
+    </div>
+
+    <!-- Close button shown on success -->
+    <div class="pay-modal-footer" id="success-footer" style="display:none">
+      <button class="btn-primary btn-full" onclick="closePayModal()">
+        Close & View History
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const VINFO = {{ vehicle_info | tojson }};
+
+// Payment state
+let currentBillId = null, currentSessId = null,
+    currentAmount = 0,    currentPlate  = '';
+let currentMethod = 'upi', currentCardType = 'debit';
+
+// ── Live updates ──────────────────────────────────────────────────────────────
+setInterval(() => {
+  fetch('/api/slots').then(r=>r.json()).then(d => {
+    updateSlotMap(d.slots);
+    updateZoneFree(d.zone_stats);
+    const st = d.stats;
+    const fe=document.getElementById('stat-free');     if(fe) fe.textContent=st.free;
+    const oe=document.getElementById('stat-occupied'); if(oe) oe.textContent=st.occupied;
+    const pe=document.getElementById('stat-pct');      if(pe) pe.textContent=st.occupancy_pct+'%';
+  });
+  fetch('/api/sensor_logs').then(r=>r.json()).then(d => updateSensorFeed(d.logs));
+}, 2000);
+setInterval(tickTimers, 1000);
+
+function updateSlotMap(slots) {
+  const zIcons={A:'🏍',B:'🛺',C:'🚗',D:'🔋',E:'🚛'};
+  slots.forEach(s => {
+    const el=document.getElementById('slot-'+s.id); if(!el) return;
+    el.className=['slot-card',
+      s.zone==='D'?'slot-ev':s.zone==='E'?'slot-heavy':'',
+      'slot-'+s.status].join(' ').trim();
+    const ic=el.querySelector('.slot-icon');
+    const vIcons={bike:'🏍',scooty:'🛵',auto:'🛺',car:'🚗',ev:'🔋',heavy:'🚛'};
+    if(ic) ic.textContent=s.status==='occupied'?(vIcons[s.vehicle_type]||zIcons[s.zone]||'🚗'):
+                          s.status==='reserved'?'🔖':'✓';
+  });
+}
+
+function updateZoneFree(zone_stats) {
+  if(!zone_stats) return;
+  const map = {0:['bike','scooty'], 1:['auto'], 2:['car'], 3:['ev'], 4:['heavy']};
+  Object.entries(map).forEach(([idx, vts]) => {
+    const zs = zone_stats[idx];
+    if(!zs) return;
+    vts.forEach(vt => {
+      const el = document.getElementById('vtf-'+vt);
+      if(el) el.textContent = zs.free + ' free';
+    });
+  });
+}
+
+function updateSensorFeed(logs) {
+  const feed=document.getElementById('sensor-feed'); if(!feed) return;
+  feed.innerHTML=logs.map(l=>`
+    <div class="sensor-entry sensor-${l.sensor_type.toLowerCase().replace(/_/g,'-')}">
+      <div class="sensor-type-badge">${l.sensor_type}</div>
+      <div class="sensor-reading">${l.reading_value}</div>
+      <div class="sensor-time">${l.timestamp}</div>
+    </div>`).join('');
+}
+
+function tickTimers() {
+  const now=Math.floor(Date.now()/1000);
+  document.querySelectorAll('.timer-cell').forEach(c => {
+    const e=c.dataset.entry; if(!e) return;
+    const ts=Math.floor(new Date(e.replace(' ','T')).getTime()/1000);
+    const el=Math.max(0,now-ts);
+    const sp=c.querySelector('.timer');
+    if(sp) sp.textContent=`${Math.floor(el/3600)}:${String(Math.floor((el%3600)/60)).padStart(2,'0')}:${String(el%60).padStart(2,'0')}`;
+  });
+}
+
+// ── Simulate Arrive ───────────────────────────────────────────────────────────
+function mySimulateArrive(vt) {
+  const vi=VINFO[vt]||{icon:'🚗',label:vt};
+  // Visually mark selected card
+  document.querySelectorAll('.vt-big-card').forEach(c=>c.classList.remove('vt-card-loading'));
+  const card=document.getElementById('vtcard-'+vt);
+  if(card) { card.classList.add('vt-card-loading'); card.querySelector('.vtbc-btn').textContent='📡 Detecting...'; }
+  // Disable all cards
+  document.querySelectorAll('.vt-big-card').forEach(c=>c.style.pointerEvents='none');
+  showToast(`📡 IR sensor detects ${vi.icon} ${vi.label}...`,'info');
+
+  fetch('/api/user/simulate/arrive',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({vehicle_type:vt})
+  })
+  .then(r=>r.json())
+  .then(d=>{
+    if(d.success){
+      showToast(`✅ ${d.message}`,'success');
+      setTimeout(()=>location.reload(), 1800);
+    } else {
+      showToast(`❌ ${d.error}`,'error');
+      document.querySelectorAll('.vt-big-card').forEach(c=>{ c.style.pointerEvents=''; });
+      if(card){ card.classList.remove('vt-card-loading'); card.querySelector('.vtbc-btn').textContent='Park Here →'; }
+    }
+  });
+}
+
+// ── Simulate Exit ─────────────────────────────────────────────────────────────
+function mySimulateExit(sessionId) {
+  showToast('Processing exit...','info');
+  fetch('/api/user/simulate/exit',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:sessionId})
+  })
+  .then(r=>r.json())
+  .then(d=>{
+    if(d.success){ openPaymentModal(d.bill); }
+    else showToast('❌ '+d.error,'error');
+  });
+}
+
+// ── Payment Modal ─────────────────────────────────────────────────────────────
+function openPaymentModal(bill) {
+  currentBillId=bill.bill_id; currentSessId=bill.session_id;
+  currentAmount=bill.amount;  currentPlate=bill.vehicle_plate;
+
+  // Update Pay Now button text with amount
+  document.getElementById('pay-now-btn').textContent=`💳 Pay ₹${bill.amount} Now`;
+
+  // Build bill in bill-section
+  const vi=VINFO[bill.vehicle_type]||{icon:'🚗',label:'Vehicle'};
+  document.getElementById('bill-section').innerHTML=`
+    <div class="receipt-header">
+      <div class="receipt-logo">🅿 SmartPark</div>
+      <div class="receipt-title">PARKING RECEIPT</div>
+    </div>
+    <div class="receipt-row"><span>Vehicle</span><strong>${vi.icon} ${bill.vehicle_plate}</strong></div>
+    <div class="receipt-row"><span>Type</span><strong>${vi.label}</strong></div>
+    <div class="receipt-row"><span>Zone / Slot</span><strong>${bill.zone} / #${bill.slot_number}</strong></div>
+    <div class="receipt-row"><span>Entry</span><strong>${bill.entry_time}</strong></div>
+    <div class="receipt-row"><span>Exit</span><strong>${bill.exit_time}</strong></div>
+    <div class="receipt-row"><span>Duration</span><strong>${bill.duration_display}</strong></div>
+    <div class="receipt-divider"></div>
+    <div class="receipt-row receipt-total">
+      <span>Total Amount</span><strong class="amount-big">₹${bill.amount}</strong>
+    </div>
+    <div class="receipt-note">₹${bill.first_hour_rate} first hr + ₹${bill.additional_rate}/hr</div>`;
+
+  currentMethod='upi'; currentCardType='debit';
+  selectPayMethod('upi');
+  document.getElementById('pay-modal').style.display='flex';
+  setTimeout(()=>{ const inp=document.getElementById('upi-id-input'); if(inp) inp.focus(); },150);
+}
+
+// which: 'upi' | 'card' | 'cash' | 'processing' | 'success'
+function showSection(which) {
+  const isMethod = which==='upi' || which==='card' || which==='cash';
+  document.getElementById('upi-section').style.display        = which==='upi'        ?'block':'none';
+  document.getElementById('card-section').style.display       = which==='card'       ?'block':'none';
+  document.getElementById('cash-section').style.display       = which==='cash'       ?'block':'none';
+  document.getElementById('processing-section').style.display = which==='processing' ?'block':'none';
+  document.getElementById('success-section').style.display    = which==='success'    ?'block':'none';
+  document.getElementById('pay-tabs').style.display           = isMethod ? 'flex':'none';
+  document.getElementById('pay-modal-footer').style.display   = isMethod ? 'block':'none';
+  document.getElementById('success-footer').style.display     = which==='success'    ?'block':'none';
+}
+
+// ── Payment method tabs ────────────────────────────────────────────────────────
+function selectPayMethod(method) {
+  currentMethod = method;
+  ['upi','card','cash'].forEach(m=>{
+    const btn=document.getElementById('tab-btn-'+m);
+    if(btn) btn.classList.toggle('active', m===method);
+  });
+  showSection(method);
+  updatePayBtnLabel();
+  if(method==='upi'){
+    setTimeout(()=>{ const inp=document.getElementById('upi-id-input'); if(inp) inp.focus(); },50);
+  }
+}
+
+function selectCardType(type) {
+  currentCardType = type;
+  document.getElementById('card-type-debit').classList.toggle('active', type==='debit');
+  document.getElementById('card-type-credit').classList.toggle('active', type==='credit');
+}
+
+function updatePayBtnLabel() {
+  const btn=document.getElementById('pay-now-btn');
+  if(!btn || currentAmount==null) return;
+  const labels={upi:'💳 Pay ₹'+currentAmount+' via UPI', card:'💳 Pay ₹'+currentAmount+' via Card', cash:'💵 Confirm Cash Payment (₹'+currentAmount+')'};
+  btn.textContent = labels[currentMethod] || ('💳 Pay ₹'+currentAmount+' Now');
+}
+
+function fillUpi(app) {
+  const inp=document.getElementById('upi-id-input'); if(!inp) return;
+  const hints={gpay:'yourname@okaxis',phonepe:'yourname@ybl',paytm:'yourname@paytm'};
+  inp.placeholder=hints[app]||'yourname@upi'; inp.focus();
+}
+
+// ── Submit Payment — routes to UPI / Card / Cash ────────────────────────────────
+function submitPayment() {
+  if(currentMethod==='card')      submitCardPayment();
+  else if(currentMethod==='cash') submitCashPayment();
+  else                             submitUpiPayment();
+}
+
+// UPI flow — unchanged from original
+function submitUpiPayment() {
+  const inp=document.getElementById('upi-id-input');
+  if(!inp){ showToast('Form error. Reload page.','error'); return; }
+  const upiId=inp.value.trim();
+  if(!upiId){
+    inp.style.borderColor='#ef4444'; inp.focus();
+    showToast('Please enter your UPI ID!','error');
+    setTimeout(()=>inp.style.borderColor='#1e2d45',2000); return;
+  }
+  if(!upiId.includes('@')){
+    inp.style.borderColor='#ef4444'; inp.focus();
+    showToast('Invalid UPI ID. Format: yourname@bankname','error'); return;
+  }
+  document.getElementById('processing-title').textContent='Processing UPI Payment...';
+  showSection('processing');
+  submitPaymentRequest({
+    bill_id:currentBillId, session_id:currentSessId,
+    amount:currentAmount,  method:'upi', upi_id:upiId, vehicle_plate:currentPlate
+  }, 'upi');
+}
+
+function submitCardPayment() {
+  const holder = document.getElementById('card-holder-input').value.trim();
+  const number = document.getElementById('card-number-input').value.trim();
+  const expiry = document.getElementById('card-expiry-input').value.trim();
+  const cvv    = document.getElementById('card-cvv-input').value.trim();
+
+  if(!holder || !number || !expiry || !cvv){
+    showToast('Please fill in all card details!','error'); return;
+  }
+  document.getElementById('processing-title').textContent='Processing '+(currentCardType==='credit'?'Credit':'Debit')+' Card Payment...';
+  showSection('processing');
+  submitPaymentRequest({
+    bill_id:currentBillId, session_id:currentSessId, amount:currentAmount,
+    method: currentCardType==='credit' ? 'credit_card' : 'debit_card',
+    card_type: currentCardType, card_holder: holder, card_number: number,
+    expiry: expiry, cvv: cvv, vehicle_plate:currentPlate
+  }, 'card');
+}
+
+function submitCashPayment() {
+  document.getElementById('processing-title').textContent='Recording Cash Payment...';
+  showSection('processing');
+  submitPaymentRequest({
+    bill_id:currentBillId, session_id:currentSessId,
+    amount:currentAmount, method:'cash', vehicle_plate:currentPlate
+  }, 'cash');
+}
+
+function submitPaymentRequest(payload, methodTab) {
+  fetch('/api/payment/process',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  })
+  .then(r=>r.json())
+  .then(d=>{
+    if(d.success){
+      showSection('success');
+      document.getElementById('success-amt').textContent='₹'+d.amount;
+      let refRow = '';
+      if(d.upi_id)         refRow = `<div class="psd-row"><span>UPI ID</span><strong>${d.upi_id}</strong></div>`;
+      else if(d.masked_number) refRow = `<div class="psd-row"><span>Card</span><strong>${d.masked_number} (${(d.card_type||'').toUpperCase()})</strong></div>`;
+      else if(d.collected_by)  refRow = `<div class="psd-row"><span>Collected By</span><strong>${d.collected_by}</strong></div>`;
+      document.getElementById('success-details').innerHTML=`
+        ${refRow}
+        <div class="psd-row"><span>Transaction ID</span>
+          <strong style="font-family:monospace;font-size:11px;color:#00d4aa">${d.transaction_id}</strong></div>
+        <div class="psd-row"><span>Vehicle</span><strong>${d.vehicle_plate}</strong></div>
+        <div class="psd-row"><span>Paid At</span><strong>${d.paid_at}</strong></div>
+        <div class="psd-row"><span>Status</span><strong style="color:#10b981">✅ ${d.status}</strong></div>`;
+    } else {
+      showSection(methodTab);
+      showToast('❌ '+d.error,'error');
+    }
+  })
+  .catch(()=>{ showSection(methodTab); showToast('Network error. Try again.','error'); });
+}
+
+function closePayModal() {
+  document.getElementById('pay-modal').style.display='none';
+  const inp=document.getElementById('upi-id-input');
+  if(inp) inp.value='';
+  const cardInputs=['card-holder-input','card-number-input','card-expiry-input','card-cvv-input'];
+  cardInputs.forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  showSection('upi');
+  location.reload();
+}
+
+function showToast(msg,type) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className=`toast toast-${type} toast-show`;
+  setTimeout(()=>t.classList.remove('toast-show'),3500);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ONLINE ADVANCE BOOKING — combines with offline walk-in above
+// ══════════════════════════════════════════════════════════════
+
+const VT_LABELS = {
+  bike:'🏍 Bike', scooty:'🛵 Scooty', auto:'🛺 Auto-Rickshaw',
+  car:'🚗 Car', ev:'🔋 EV Car', heavy:'🚛 Heavy Vehicle'
+};
+
+// Set min date to today, prefill a sensible default time
+(function initBookingForm() {
+  const dateInput = document.getElementById('bk-date');
+  if (!dateInput) return;
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  dateInput.min = todayStr;
+  dateInput.value = todayStr;
+
+  const startInput = document.getElementById('bk-start');
+  const endInput   = document.getElementById('bk-end');
+  if (startInput && endInput) {
+    const nextHour = new Date(today.getTime() + 60*60*1000);
+    const pad = n => String(n).padStart(2,'0');
+    startInput.value = `${pad(nextHour.getHours())}:00`;
+    const endHour = new Date(nextHour.getTime() + 2*60*60*1000);
+    endInput.value = `${pad(endHour.getHours())}:00`;
+  }
+})();
+
+// ── Toggle between Park Now and Book in Advance ───────────────────────────────
+function switchParkingMode(mode) {
+  document.getElementById('pmt-now')?.classList.toggle('active', mode==='now');
+  document.getElementById('pmt-advance')?.classList.toggle('active', mode==='advance');
+  const nowPanel = document.getElementById('park-now-panel');
+  const advPanel = document.getElementById('park-advance-panel');
+  if (nowPanel) nowPanel.style.display = mode==='now' ? 'block' : 'none';
+  if (advPanel) advPanel.style.display = mode==='advance' ? 'block' : 'none';
+}
+
+// ── Search available slots for the chosen window ──────────────────────────────
+function searchBookingSlots() {
+  const vtype = document.getElementById('bk-vtype').value;
+  const date  = document.getElementById('bk-date').value;
+  const start = document.getElementById('bk-start').value;
+  const end   = document.getElementById('bk-end').value;
+
+  if (!date || !start || !end) {
+    showToast('Please fill date, start time, and end time.', 'error');
+    return;
+  }
+  if (start >= end) {
+    showToast('End time must be after start time.', 'error');
+    return;
+  }
+
+  const resultsDiv = document.getElementById('booking-results');
+  resultsDiv.innerHTML = '<div class="booking-loading">🔍 Searching available slots...</div>';
+
+  fetch('/api/booking/search', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({vehicle_type:vtype, booking_date:date, start_time:start, end_time:end})
+  })
+  .then(r=>r.json())
+  .then(d => {
+    if (!d.success) {
+      resultsDiv.innerHTML = `<div class="booking-empty">❌ ${d.error}</div>`;
+      return;
+    }
+    if (!d.slots.length) {
+      resultsDiv.innerHTML = `<div class="booking-empty">No slots available for ${VT_LABELS[vtype]} on ${date} between ${start}–${end}. Try a different time.</div>`;
+      return;
+    }
+    resultsDiv.innerHTML = `
+      <div class="booking-results-label">${d.count} slot${d.count>1?'s':''} available — click to book:</div>
+      <div class="booking-slots-grid">
+        ${d.slots.map(s => `
+          <div class="bk-slot-card" onclick="confirmBooking(${s.id}, '${s.zone_label}', ${s.slot_number}, '${vtype}', '${date}', '${start}', '${end}')">
+            <div class="bk-slot-zone">${s.zone_label}</div>
+            <div class="bk-slot-num">#${s.slot_number}</div>
+            <div class="bk-slot-action">Book This →</div>
+          </div>
+        `).join('')}
+      </div>`;
+  })
+  .catch(() => {
+    resultsDiv.innerHTML = '<div class="booking-empty">Network error. Please try again.</div>';
+  });
+}
+
+function resetBookingResults() {
+  const r = document.getElementById('booking-results');
+  if (r) r.innerHTML = '';
+}
+
+// ── Confirm and create the booking ────────────────────────────────────────────
+function confirmBooking(slotId, zoneLabel, slotNumber, vtype, date, start, end) {
+  if (!confirm(`Confirm booking?\n\n${zoneLabel} · Slot #${slotNumber}\n${date} · ${start}–${end}\n\nNo payment required now — pay after parking.`)) {
+    return;
+  }
+  fetch('/api/booking/create', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      slot_id: slotId, vehicle_type: vtype,
+      booking_date: date, start_time: start, end_time: end
+    })
+  })
+  .then(r=>r.json())
+  .then(d => {
+    if (d.success) {
+      showToast(`✅ ${d.message}`, 'success');
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      showToast(`❌ ${d.error}`, 'error');
+    }
+  });
+}
+
+// ── User clicks "I've Arrived" on an upcoming booking ─────────────────────────
+function arriveBooking(bookingId) {
+  showToast('📡 Sensors detecting your arrival...', 'info');
+  fetch('/api/booking/arrive', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({booking_id: bookingId})
+  })
+  .then(r=>r.json())
+  .then(d => {
+    if (d.success) {
+      showToast(`✅ ${d.message}`, 'success');
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      showToast(`❌ ${d.error}`, 'error');
+    }
+  });
+}
+
+// ── Cancel an upcoming booking ─────────────────────────────────────────────────
+function cancelBooking(bookingId) {
+  if (!confirm('Cancel this booking? The slot will be released.')) return;
+  fetch('/api/booking/cancel', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({booking_id: bookingId})
+  })
+  .then(r=>r.json())
+  .then(d => {
+    showToast(d.success ? '✅ Booking cancelled.' : `❌ ${d.error}`, d.success?'success':'error');
+    if (d.success) setTimeout(() => location.reload(), 1000);
+  });
+}
+
+// ── Periodically check for booking expiry (no-show after grace period) ────────
+setInterval(() => {
+  fetch('/api/booking/check_expiry', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+  .then(r=>r.json())
+  .then(d => {
+    if (d.success && d.expired_count > 0) {
+      showToast(`⏰ ${d.expired_count} booking(s) expired due to no-show.`, 'info');
+      setTimeout(() => location.reload(), 1500);
+    }
+  });
+}, 30000); // check every 30 seconds
+
+tickTimers();
+
+// FEATURE 1: LIVE SLOT COUNTER
+function updateLiveCounter() {
+  fetch('/api/slot_map')
+    .then(r => r.json())
+    .then(d => {
+      const stats = d.stats;
+      const freeEl = document.getElementById('stat-free');
+      const occEl  = document.getElementById('stat-occupied');
+      const resEl  = document.getElementById('stat-reserved');
+      const pctEl  = document.getElementById('stat-pct');
+      if (freeEl) freeEl.textContent = stats.free;
+      if (occEl)  occEl.textContent  = stats.occupied;
+      if (resEl)  resEl.textContent  = stats.reserved;
+      if (pctEl)  pctEl.textContent  = stats.occupancy_pct + '%';
+      // FEATURE 2: LIVE SLOT MAP
+      const mapEl = document.getElementById('live-slot-map');
+      if (!mapEl) return;
+      mapEl.innerHTML = '';
+      d.slots.forEach(slot => {
+        const cell = document.createElement('div');
+        cell.className = 'slot-cell slot-' + slot.status;
+        cell.title = 'Slot ' + slot.slot_number + ' | ' + slot.zone_label + ' | ' + slot.status.toUpperCase();
+        cell.innerHTML = '<span class="slot-num">' + slot.slot_number + '</span><span class="slot-ico">' + (slot.status==='free'?'🟢':slot.status==='occupied'?'🔴':'🟡') + '</span>';
+        mapEl.appendChild(cell);
+      });
+    });
+}
+updateLiveCounter();
+setInterval(updateLiveCounter, 10000);
+
+// FEATURE: ESTIMATED BILL PREVIEW
+function updateEstimate() {
+  const vtype = document.getElementById('est-vtype').value;
+  const duration = document.getElementById('est-duration').value;
+  fetch('/api/estimated_bill?vehicle_type=' + vtype + '&duration_minutes=' + duration)
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('est-amount');
+      if(el) el.textContent = '₹' + d.estimated_amount;
+    });
+}
+// Show estimated bill card
+const estCard = document.getElementById('estimated-bill-card');
+if(estCard) estCard.style.display = 'block';
+updateEstimate();
+
+// FEATURE 3: LIVE BILL TIMER
+const RATES = {
+  bike:{fh:10,ph:5}, scooty:{fh:10,ph:5},
+  auto:{fh:15,ph:8}, car:{fh:20,ph:10},
+  ev:{fh:25,ph:12},  heavy:{fh:40,ph:20}
+};
+function updateLiveBill() {
+  document.querySelectorAll('.live-bill-display').forEach(el => {
+    const entry = el.dataset.entry;
+    const vtype = el.dataset.vtype;
+    if (!entry || !vtype) return;
+    const entryMs = new Date(entry.replace(' ','T')).getTime();
+    const mins = Math.max(0, (Date.now() - entryMs) / 60000);
+    const r = RATES[vtype] || {fh:20,ph:10};
+    const cost = mins <= 60 ? r.fh : r.fh + Math.ceil((mins - 60) / 60) * r.ph;
+    el.textContent = 'Rs.' + cost.toFixed(0);
+  });
+}
+updateLiveBill();
+setInterval(updateLiveBill, 5000);
+</script>
+<style>
+.slot-map-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:8px;margin-top:12px;}
+.slot-cell{border-radius:8px;padding:8px 4px;text-align:center;font-size:11px;font-weight:600;cursor:default;border:1px solid rgba(255,255,255,0.08);transition:transform .2s;}
+.slot-cell:hover{transform:scale(1.08);}
+.slot-free{background:rgba(0,200,100,0.15);color:#00c864;}
+.slot-occupied{background:rgba(239,68,68,0.15);color:#ef4444;}
+.slot-reserved{background:rgba(251,191,36,0.15);color:#fbbf24;}
+.slot-num{display:block;font-size:13px;font-weight:700;}
+.slot-ico{display:block;font-size:16px;margin-top:2px;}
+.live-bill-display{font-size:22px;font-weight:800;color:#00d4aa;animation:pulse-cost 2s infinite;}
+@keyframes pulse-cost{0%,100%{opacity:1;}50%{opacity:0.7;}}
+.history-link-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;text-decoration:none;margin-top:8px;transition:background .2s;}
+.history-link-btn:hover{background:rgba(99,102,241,0.28);color:#fff;}
+</style>
+{% endblock %}
+

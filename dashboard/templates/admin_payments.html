@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Payments — SmartPark{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1 class="page-title">💳 Payment Records</h1>
+    <p class="page-subtitle">All UPI, Card & Cash transactions · Today's revenue: ₹{{ "%.0f"|format(today_revenue) }}</p></div>
+  <a href="{{ url_for('admin_dashboard') }}" class="btn-secondary">← Dashboard</a>
+</div>
+<div class="card">
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead><tr>
+        <th>ID</th><th>Transaction ID</th><th>User</th><th>Vehicle</th>
+        <th>Ref / UPI ID</th><th>Amount</th><th>Method</th><th>Status</th><th>Paid At</th>
+      </tr></thead>
+      <tbody>
+        {% for p in payments %}
+        <tr>
+          <td><code>#{{ p.id }}</code></td>
+          <td><code style="font-size:11px;color:#00d4aa">{{ p.transaction_id }}</code></td>
+          <td>{{ p.user_name or 'Walk-in' }}<br>
+            <small style="color:#64748b">{{ p.user_email or '' }}</small></td>
+          <td><span class="plate-badge">{{ p.vehicle_plate }}</span></td>
+          <td>{{ p.upi_id or p.payment_ref or '—' }}</td>
+          <td><strong style="color:#00d4aa">₹{{ "%.0f"|format(p.amount) }}</strong></td>
+          <td><span style="text-transform:uppercase;font-size:11px">{{ p.payment_method }}</span></td>
+          <td><span class="pay-badge pay-done">✅ {{ p.status }}</span></td>
+          <td>{{ p.paid_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="empty-state">No payments yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

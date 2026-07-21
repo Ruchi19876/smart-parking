@@ -1,0 +1,572 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — SmartPark{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Admin Command Center</h1>
+    <p class="page-subtitle">Real-time control · All zones · All users · Updates every 2s</p>
+  </div>
+  <div class="header-actions">
+    <div class="live-indicator"><span class="pulse-dot"></span> LIVE</div>
+    <div class="notif-badge" id="notif-badge" style="display:none">
+      <span class="notif-dot"></span>
+      <span id="notif-count">0</span> new arrival
+    </div>
+  </div>
+</div>
+
+
+<!-- Stats Cards -->
+<div class="stats-grid">
+  <div class="stat-card stat-total">
+    <div class="stat-icon">🅿</div>
+    <div class="stat-body"><div class="stat-value" id="stat-total">{{ stats.total }}</div><div class="stat-label">Total Slots</div></div>
+  </div>
+  <div class="stat-card stat-free">
+    <div class="stat-icon">🟢</div>
+    <div class="stat-body"><div class="stat-value" id="stat-free">{{ stats.free }}</div><div class="stat-label">Available</div></div>
+  </div>
+  <div class="stat-card stat-occupied">
+    <div class="stat-icon">🔴</div>
+    <div class="stat-body"><div class="stat-value" id="stat-occupied">{{ stats.occupied }}</div><div class="stat-label">Occupied</div></div>
+  </div>
+  <div class="stat-card stat-reserved">
+    <div class="stat-icon">🟡</div>
+    <div class="stat-body"><div class="stat-value" id="stat-reserved">{{ stats.reserved }}</div><div class="stat-label">Reserved</div></div>
+  </div>
+  <div class="stat-card stat-pct">
+    <div class="stat-icon">📊</div>
+    <div class="stat-body"><div class="stat-value" id="stat-pct">{{ stats.occupancy_pct }}%</div><div class="stat-label">Occupancy</div></div>
+  </div>
+  <div class="stat-card stat-revenue">
+    <div class="stat-icon">💰</div>
+    <div class="stat-body"><div class="stat-value" id="stat-revenue">₹{{ "%.0f"|format(today_revenue) }}</div><div class="stat-label">Today's Revenue</div></div>
+  </div>
+  <div class="stat-card" style="border-left:3px solid #06b6d4">
+    <div class="stat-icon">⚡</div>
+    <div class="stat-body"><div class="stat-value" id="stat-active" style="color:#06b6d4">{{ active_sessions|length }}</div><div class="stat-label">Active Now</div></div>
+  </div>
+</div>
+
+
+<!-- FEATURE: ADMIN NOTIFICATION PANEL -->
+<!-- Occupancy Bar -->
+<div class="occupancy-bar-container">
+  <div class="occupancy-bar-label">
+    <span>Overall Occupancy</span><span id="occ-pct-label">{{ stats.occupancy_pct }}%</span>
+  </div>
+  <div class="occupancy-bar">
+    <div class="occupancy-fill" id="occ-fill" style="width:{{ stats.occupancy_pct }}%"></div>
+  </div>
+</div>
+
+<!-- Zone Summary -->
+<div class="zone-summary-row">
+  {% for zs in zone_stats %}
+  <div class="zone-sum-card zone-sum-{{ zs.zone|lower }}">
+    <div class="zs-header">
+      <span class="zs-icon">{% if zs.zone=='A' %}🏍🛵{% elif zs.zone=='B' %}🛺{% elif zs.zone=='C' %}🚗{% elif zs.zone=='D' %}🔋{% else %}🚛{% endif %}</span>
+      <div><div class="zs-name">{{ zs.zone_label }}</div><div class="zs-vtype">{{ zs.vehicle_type }}</div></div>
+    </div>
+    <div class="zs-stats">
+      <span class="zs-free">{{ zs.free }} free</span>
+      <span class="zs-occ">{{ zs.occupied }} occ</span>
+      <span class="zs-total">/ {{ zs.total }}</span>
+    </div>
+    <div class="zs-bar"><div class="zs-fill" style="width:{{ ((zs.occupied/zs.total)*100)|int if zs.total else 0 }}%"></div></div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- ══════════════════════════════════════════
+     TAB NAVIGATION
+     ══════════════════════════════════════════ -->
+<div class="dash-tabs">
+  <button class="dash-tab active" onclick="switchTab('sessions')" id="tab-sessions">
+    🚗 Active Sessions <span class="tab-badge" id="tbadge-sessions">{{ active_sessions|length }}</span>
+  </button>
+  <button class="dash-tab" onclick="switchTab('payments')" id="tab-payments">
+    💳 Payment History <span class="tab-badge" id="tbadge-payments">{{ all_payments|length }}</span>
+  </button>
+  <button class="dash-tab" onclick="switchTab('bookings')" id="tab-bookings">
+    📅 Online Bookings <span class="tab-badge" id="tbadge-bookings">{{ all_bookings|length }}</span>
+  </button>
+</div>
+
+<!-- ══ TAB 1: Active Sessions ══ -->
+<div class="tab-panel" id="panel-sessions">
+  <div class="card">
+    <div class="card-header">
+      <h2>🚗 All Active Sessions <span class="badge" id="active-count">{{ active_sessions|length }}</span></h2>
+      <span style="font-size:11px;color:#64748b">All users · All zones · Live timers · Estimated bills</span>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Vehicle Plate</th><th>Type</th><th>Zone / Slot</th>
+          <th>User</th><th>Entry Time</th><th>Duration</th><th>Est. Bill</th><th>Action</th>
+        </tr></thead>
+        <tbody id="sessions-tbody">
+          {% for s in active_sessions %}
+          <tr id="sr-{{ s.id }}">
+            <td><code>#{{ s.id }}</code></td>
+            <td><span class="plate-badge">{{ s.vehicle_plate }}</span></td>
+            <td>{% set vi=vehicle_info.get(s.vehicle_type,{'icon':'🚗','label':'Car'}) %}
+              <span class="vtype-pill vtp-{{ s.vehicle_type }}">{{ vi.icon }} {{ vi.label }}</span></td>
+            <td>{{ s.zone_label or s.zone }} / <strong>#{{ s.slot_number }}</strong></td>
+            <td>
+              <div>{{ s.user_name or 'Walk-in' }}</div>
+              {% if s.user_phone %}<div style="font-size:11px;color:#64748b">{{ s.user_phone }}</div>{% endif %}
+            </td>
+            <td>{{ s.entry_time }}</td>
+            <td class="timer-cell" data-entry="{{ s.entry_time }}" data-vtype="{{ s.vehicle_type }}">
+              <span class="timer">{{ s.elapsed_display }}</span>
+            </td>
+            <td class="est-bill-cell" data-entry="{{ s.entry_time }}" data-vtype="{{ s.vehicle_type }}">
+              <span class="est-bill">—</span>
+            </td>
+            <td><button class="btn-exit-session" onclick="exitSession({{ s.id }})">Exit & Bill</button></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="empty-state">No active sessions yet. Users will appear here once they park via their dashboard.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ TAB 4: Payment History ══ -->
+<div class="tab-panel" id="panel-payments" style="display:none">
+  <div class="card">
+    <div class="card-header">
+      <h2>💳 All Payment History <span class="badge" id="payments-count">{{ all_payments|length }}</span></h2>
+      <span style="font-size:11px;color:#64748b">Every UPI transaction · All users · Today's revenue: ₹{{ "%.0f"|format(summary.revenue_today) }}</span>
+    </div>
+
+    <!-- Payment search -->
+    <div style="padding:10px 0 14px">
+      <input type="text" id="payment-search" placeholder="🔍 Search by user, plate, or transaction ID..."
+             oninput="filterPayments(this.value)"
+             style="width:100%;padding:9px 13px;background:#0a0f1e;border:1px solid #1e2d45;
+                    border-radius:8px;color:#e2e8f0;font-size:13px;font-family:'Inter',sans-serif;outline:none">
+    </div>
+
+    <div class="table-wrapper">
+      <table class="data-table" id="payments-table">
+        <thead><tr>
+          <th>#</th><th>Transaction ID</th><th>User</th><th>Vehicle</th>
+          <th>Ref / UPI ID</th><th>Amount</th><th>Method</th><th>Status</th><th>Paid At</th>
+        </tr></thead>
+        <tbody id="payments-tbody">
+          {% for p in all_payments %}
+          <tr class="payment-row"
+              data-user="{{ (p.user_name or '')|lower }}"
+              data-plate="{{ (p.vehicle_plate or '')|lower }}"
+              data-txn="{{ (p.transaction_id or '')|lower }}">
+            <td><code>#{{ p.id }}</code></td>
+            <td><code style="font-size:11px;color:#00d4aa">{{ p.transaction_id }}</code></td>
+            <td>
+              <div style="font-weight:600">{{ p.user_name or 'Walk-in' }}</div>
+              {% if p.user_email %}<div style="font-size:11px;color:#64748b">{{ p.user_email }}</div>{% endif %}
+            </td>
+            <td><span class="plate-badge">{{ p.vehicle_plate }}</span></td>
+            <td style="font-size:12px">{{ p.upi_id or p.payment_ref or '—' }}</td>
+            <td><strong style="color:#00d4aa">₹{{ "%.0f"|format(p.amount) }}</strong></td>
+            <td><span style="text-transform:uppercase;font-size:11px;color:#94a3b8">{{ p.payment_method }}</span></td>
+            <td><span class="pay-badge pay-done">✅ {{ p.status }}</span></td>
+            <td style="font-size:11px;color:#64748b">{{ p.paid_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="empty-state">No payments made yet. Payments appear here once users pay their bills via UPI, Card, or Cash.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TAB 5: Online Bookings ══ -->
+<div class="tab-panel" id="panel-bookings" style="display:none">
+  <div class="card">
+    <div class="card-header">
+      <h2>📅 All Online Bookings <span class="badge" id="bookings-count">{{ all_bookings|length }}</span></h2>
+      <span style="font-size:11px;color:#64748b">Advance reservations · Auto-expires after 10 min no-show grace period</span>
+    </div>
+
+    <div style="padding:10px 0 14px">
+      <input type="text" id="booking-admin-search" placeholder="🔍 Search by user, plate, or zone..."
+             oninput="filterBookings(this.value)"
+             style="width:100%;padding:9px 13px;background:#0a0f1e;border:1px solid #1e2d45;
+                    border-radius:8px;color:#e2e8f0;font-size:13px;font-family:'Inter',sans-serif;outline:none">
+    </div>
+
+    <div class="table-wrapper">
+      <table class="data-table" id="bookings-table">
+        <thead><tr>
+          <th>#</th><th>User</th><th>Vehicle</th><th>Zone / Slot</th>
+          <th>Date</th><th>Time Window</th><th>Status</th><th>Created</th>
+        </tr></thead>
+        <tbody id="bookings-tbody">
+          {% for b in all_bookings %}
+          {% set bvi = vehicle_info.get(b.vehicle_type, {'icon':'🚗','label':'Car'}) %}
+          <tr class="booking-row"
+              data-user="{{ (b.user_name or '')|lower }}"
+              data-plate="{{ (b.vehicle_plate or '')|lower }}"
+              data-zone="{{ (b.zone_label or '')|lower }}">
+            <td><code>#{{ b.id }}</code></td>
+            <td>
+              <div style="font-weight:600">{{ b.user_name }}</div>
+              <div style="font-size:11px;color:#64748b">{{ b.user_email }}</div>
+            </td>
+            <td>
+              <span class="vtype-pill vtp-{{ b.vehicle_type }}">{{ bvi.icon }} {{ bvi.label }}</span>
+              {% if b.vehicle_plate %}<div style="font-size:11px;color:#64748b;margin-top:2px">{{ b.vehicle_plate }}</div>{% endif %}
+            </td>
+            <td>{{ b.zone_label }} / <strong>#{{ b.slot_number }}</strong></td>
+            <td>{{ b.booking_date }}</td>
+            <td>{{ b.start_time }} – {{ b.end_time }}</td>
+            <td><span class="booking-status-badge bsb-{{ b.status }}">{{ b.status }}</span></td>
+            <td style="font-size:11px;color:#64748b">{{ b.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="empty-state">No bookings made yet. Online bookings appear here once users reserve a slot in advance.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Bill Modal -->
+<div class="modal-overlay" id="bill-modal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3>🧾 Parking Bill Receipt</h3>
+      <button class="modal-close" onclick="document.getElementById('bill-modal').style.display='none'">✕</button>
+    </div>
+    <div class="bill-receipt" id="bill-content"></div>
+    <button class="btn-primary" onclick="document.getElementById('bill-modal').style.display='none'">Close</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const VINFO = {{ vehicle_info | tojson }};
+const OCC_DATA = {{ occ_trend | tojson }};
+const REV_DATA = {{ rev_trend | tojson }};
+const PEAK_DATA = {{ peak_hours | tojson }};
+
+const PRICING = {
+  bike:{fh:10,ph:5}, scooty:{fh:10,ph:5},
+  car:{fh:20,ph:10}, auto:{fh:15,ph:8},
+  ev:{fh:25,ph:12},  heavy:{fh:40,ph:20}
+};
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+let chartsBuilt = false;
+
+function switchTab(name) {
+  document.querySelectorAll('.dash-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('tab-'+name).classList.add('active');
+  document.getElementById('panel-'+name).style.display = 'block';
+  // Build charts only when analytics tab is first opened
+  if(name === 'analytics' && !chartsBuilt) {
+    buildCharts();
+    chartsBuilt = true;
+  }
+}
+
+// ── Chart.js setup ────────────────────────────────────────────────────────────
+const CO = {
+  responsive:true,
+  plugins:{ legend:{ labels:{ color:'#94a3b8', font:{family:'Inter'} } } },
+  scales:{
+    x:{ ticks:{color:'#64748b'}, grid:{color:'#1e2a3a'} },
+    y:{ ticks:{color:'#64748b'}, grid:{color:'#1e2a3a'} }
+  }
+};
+
+let revChartObj = null, occChartObj = null, peakChartObj = null;
+
+function buildCharts() {
+  // Revenue bar chart — full width, color today differently
+  revChartObj = new Chart('revChart', {type:'bar', data:{
+    labels: REV_DATA.labels,
+    datasets:[{
+      label:'Revenue (₹)', data:REV_DATA.data,
+      backgroundColor: REV_DATA.data.map((v,i) =>
+        i===REV_DATA.data.length-1 ? 'rgba(0,212,170,.85)' : 'rgba(99,102,241,.65)'),
+      borderColor: REV_DATA.data.map((v,i) =>
+        i===REV_DATA.data.length-1 ? '#00d4aa' : '#6366f1'),
+      borderWidth:1, borderRadius:8
+    }]
+  }, options:{...CO,
+    plugins:{...CO.plugins,
+      tooltip:{callbacks:{label:ctx=>' ₹'+ctx.raw.toFixed(0)}}
+    }
+  }});
+
+  // Occupancy line
+  occChartObj = new Chart('occChart', {type:'line', data:{
+    labels:OCC_DATA.labels,
+    datasets:[{label:'Occupancy %', data:OCC_DATA.data,
+      borderColor:'#00d4aa', backgroundColor:'rgba(0,212,170,.1)',
+      fill:true, tension:.4, borderWidth:2, pointBackgroundColor:'#00d4aa'}]
+  }, options:{...CO, scales:{...CO.scales,
+    y:{...CO.scales.y, min:0, max:100,
+       ticks:{color:'#64748b', callback:v=>v+'%'}}}}});
+
+  // Peak hours bar
+  peakChartObj = new Chart('peakChart', {type:'bar', data:{
+    labels:PEAK_DATA.labels,
+    datasets:[{label:'Entries', data:PEAK_DATA.data,
+      backgroundColor:PEAK_DATA.data.map(v=>
+        v===Math.max(...PEAK_DATA.data)?'rgba(239,68,68,.85)':'rgba(251,146,60,.55)'),
+      borderRadius:5}]
+  }, options:CO});
+}
+
+// ── Live refresh ──────────────────────────────────────────────────────────────
+let prevActive = {{ active_sessions|length }};
+
+setInterval(refreshAdmin, 2000);
+setInterval(tickAll, 1000);
+
+function refreshAdmin() {
+  fetch('/api/slots').then(r=>r.json()).then(d => updateStats(d.stats));
+  fetch('/api/sessions').then(r=>r.json()).then(d => {
+    updateSessionsTable(d.sessions);
+    if(d.sessions.length > prevActive) {
+      showNotifBadge(d.sessions.length - prevActive);
+    }
+    prevActive = d.sessions.length;
+  });
+  fetch('/api/revenue').then(r=>r.json()).then(d => {
+    const el = document.getElementById('stat-revenue');
+    if(el) el.textContent = '₹' + Math.round(d.today_revenue);
+    const ar = document.getElementById('a-rev-today');
+    if(ar) ar.textContent = '₹' + Math.round(d.today_revenue);
+  });
+}
+
+function updateStats(s) {
+  const map = {total:'stat-total', free:'stat-free', occupied:'stat-occupied', reserved:'stat-reserved'};
+  Object.entries(map).forEach(([k,id]) => {
+    const el=document.getElementById(id); if(el) el.textContent=s[k];
+  });
+  const pct = s.occupancy_pct||0;
+  const p=document.getElementById('stat-pct');      if(p) p.textContent=pct+'%';
+  const l=document.getElementById('occ-pct-label'); if(l) l.textContent=pct+'%';
+  const f=document.getElementById('occ-fill');      if(f) f.style.width=pct+'%';
+}
+
+function updateSessionsTable(sessions) {
+  const ac=document.getElementById('active-count'); if(ac) ac.textContent=sessions.length;
+  const tb1=document.getElementById('tbadge-sessions'); if(tb1) tb1.textContent=sessions.length;
+  const sa=document.getElementById('stat-active'); if(sa) sa.textContent=sessions.length;
+  const arr=document.getElementById('a-arrived');
+  if(arr) { fetch('/api/revenue').then(r=>r.json()); } // refresh triggered separately
+
+  const tb=document.getElementById('sessions-tbody'); if(!tb) return;
+  if(!sessions.length) {
+    tb.innerHTML='<tr><td colspan="9" class="empty-state">No active sessions yet. Users will appear here once they park via their dashboard.</td></tr>';
+    return;
+  }
+  tb.innerHTML = sessions.map(s => {
+    const vi=VINFO[s.vehicle_type]||{icon:'🚗',label:'Car'};
+    return `<tr id="sr-${s.id}">
+      <td><code>#${s.id}</code></td>
+      <td><span class="plate-badge">${s.vehicle_plate}</span></td>
+      <td><span class="vtype-pill vtp-${s.vehicle_type}">${vi.icon} ${vi.label}</span></td>
+      <td>${s.zone_label||s.zone} / <strong>#${s.slot_number}</strong></td>
+      <td><div>${s.user_name||'Walk-in'}</div>${s.user_phone?`<div style="font-size:11px;color:#64748b">${s.user_phone}</div>`:''}</td>
+      <td>${s.entry_time}</td>
+      <td class="timer-cell" data-entry="${s.entry_time}" data-vtype="${s.vehicle_type}">
+        <span class="timer">${s.elapsed_display}</span></td>
+      <td class="est-bill-cell" data-entry="${s.entry_time}" data-vtype="${s.vehicle_type}">
+        <span class="est-bill">—</span></td>
+      <td><button class="btn-exit-session" onclick="exitSession(${s.id})">Exit & Bill</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function tickAll() {
+  const now = Math.floor(Date.now()/1000);
+  document.querySelectorAll('.timer-cell').forEach(c => {
+    const e=c.dataset.entry; if(!e) return;
+    const ts=Math.floor(new Date(e.replace(' ','T')).getTime()/1000);
+    const el=Math.max(0,now-ts);
+    const sp=c.querySelector('.timer');
+    if(sp) sp.textContent=`${Math.floor(el/3600)}:${String(Math.floor((el%3600)/60)).padStart(2,'0')}:${String(el%60).padStart(2,'0')}`;
+  });
+  document.querySelectorAll('.est-bill-cell').forEach(c => {
+    const e=c.dataset.entry; const vt=c.dataset.vtype; if(!e) return;
+    const ts=Math.floor(new Date(e.replace(' ','T')).getTime()/1000);
+    const secs=Math.max(0,now-ts);
+    const mins=Math.floor(secs/60);
+    const p=PRICING[vt]||{fh:20,ph:10};
+    const bill=mins<=60?p.fh:p.fh+Math.ceil((mins-60)/60)*p.ph;
+    const sp=c.querySelector('.est-bill');
+    if(sp) sp.textContent='₹'+bill;
+  });
+}
+
+// ── Admin exit (force-exit any user's session) ────────────────────────────────
+
+function exitSession(id) {
+  fetch('/api/simulate/exit',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:id})})
+  .then(r=>r.json()).then(d=>{
+    if(d.success){showBillModal(d.bill);refreshAdmin();}
+    else showToast('❌ '+d.error,'error');
+  });
+}
+
+// ── User search ───────────────────────────────────────────────────────────────
+function filterUsers(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#users-tbody .user-row').forEach(row => {
+    const name  = row.dataset.name  || '';
+    const email = row.dataset.email || '';
+    const plate = row.dataset.plate || '';
+    row.style.display = (!q || name.includes(q) || email.includes(q) || plate.includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Payment search ────────────────────────────────────────────────────────────
+function filterPayments(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#payments-tbody .payment-row').forEach(row => {
+    const user  = row.dataset.user  || '';
+    const plate = row.dataset.plate || '';
+    const txn   = row.dataset.txn   || '';
+    row.style.display = (!q || user.includes(q) || plate.includes(q) || txn.includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Bookings search ───────────────────────────────────────────────────────────
+function filterBookings(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#bookings-tbody .booking-row').forEach(row => {
+    const user  = row.dataset.user  || '';
+    const plate = row.dataset.plate || '';
+    const zone  = row.dataset.zone  || '';
+    row.style.display = (!q || user.includes(q) || plate.includes(q) || zone.includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function showNotifBadge(count) {
+  const b=document.getElementById('notif-badge'); if(!b) return;
+  b.style.display='flex';
+  document.getElementById('notif-count').textContent=count;
+  setTimeout(()=>b.style.display='none',5000);
+}
+
+function showBillModal(b) {
+  const vi=VINFO[b.vehicle_type]||{icon:'🚗',label:'Vehicle'};
+  document.getElementById('bill-content').innerHTML=`
+    <div class="receipt-header">
+      <div class="receipt-logo">🅿 SmartPark</div>
+      <div class="receipt-title">PARKING RECEIPT</div>
+    </div>
+    <div class="receipt-row"><span>Vehicle</span><strong>${vi.icon} ${b.vehicle_plate}</strong></div>
+    <div class="receipt-row"><span>Type</span><strong>${vi.label}</strong></div>
+    <div class="receipt-row"><span>Zone / Slot</span><strong>${b.zone} / #${b.slot_number}</strong></div>
+    <div class="receipt-row"><span>Entry</span><strong>${b.entry_time}</strong></div>
+    <div class="receipt-row"><span>Exit</span><strong>${b.exit_time}</strong></div>
+    <div class="receipt-row"><span>Duration</span><strong>${b.duration_display}</strong></div>
+    <div class="receipt-divider"></div>
+    <div class="receipt-row receipt-total">
+      <span>Total Amount</span><strong class="amount-big">${b.amount_display}</strong>
+    </div>
+    <div class="receipt-note">₹${b.first_hour_rate} first hr + ₹${b.additional_rate}/hr after</div>`;
+  document.getElementById('bill-modal').style.display='flex';
+}
+
+function showToast(msg,type) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className=`toast toast-${type} toast-show`;
+  setTimeout(()=>t.classList.remove('toast-show'),3500);
+}
+
+refreshAdmin(); tickAll();
+
+// FEATURE: NOTIFICATIONS
+function loadNotifications() {
+  fetch('/api/notifications')
+    .then(r => r.json())
+    .then(d => {
+      const list = document.getElementById('notification-list');
+      if (!list) return;
+      list.innerHTML = '';
+      d.notifications.forEach(n => {
+        const colors = {danger:'rgba(239,68,68,0.1)', warning:'rgba(251,191,36,0.1)', success:'rgba(16,185,129,0.1)', info:'rgba(99,102,241,0.1)'};
+        const textColors = {danger:'#ef4444', warning:'#fbbf24', success:'#10b981', info:'#818cf8'};
+        const div = document.createElement('div');
+        div.style.cssText = `padding:10px 16px;margin:4px 8px;border-radius:8px;background:${colors[n.type]||colors.info};color:${textColors[n.type]||textColors.info};font-size:13px;font-weight:500;`;
+        div.textContent = n.icon + '  ' + n.msg;
+        list.appendChild(div);
+      });
+    });
+}
+loadNotifications();
+setInterval(loadNotifications, 30000);
+
+// FEATURE: DAILY SUMMARY
+function loadDailySummary() {
+  fetch('/api/daily_summary')
+    .then(r => r.json())
+    .then(d => {
+      const s = d.summary;
+      const mp = d.most_parked;
+      const icons = {bike:'🏍', scooty:'🛵', auto:'🛺', car:'🚗', ev:'🔋', heavy:'🚛'};
+      if(document.getElementById('ds-sessions')) document.getElementById('ds-sessions').textContent = s.arrived_today;
+      if(document.getElementById('ds-users'))    document.getElementById('ds-users').textContent    = s.unique_users_today;
+      if(document.getElementById('ds-revenue'))  document.getElementById('ds-revenue').textContent  = '₹' + Math.round(s.revenue_today);
+      if(document.getElementById('ds-avgdur'))   document.getElementById('ds-avgdur').textContent   = Math.round(s.avg_duration_min) + ' min';
+      if(document.getElementById('ds-busyzone')) document.getElementById('ds-busyzone').textContent = s.busiest_zone || 'N/A';
+      if(document.getElementById('ds-mostparked') && mp.vehicle_type !== 'N/A')
+        document.getElementById('ds-mostparked').textContent = (icons[mp.vehicle_type]||'🚗') + ' ' + mp.vehicle_type + ' (' + mp.cnt + ')';
+    });
+}
+loadDailySummary();
+setInterval(loadDailySummary, 30000);
+
+// FEATURE: ZONE AVAILABILITY BANNER UPDATE
+function updateZoneBanner() {
+  fetch('/api/slot_map')
+    .then(r => r.json())
+    .then(d => {
+      if(!d.stats) return;
+    });
+}
+setInterval(updateZoneBanner, 15000);
+</script>
+
+<style>
+/* Zone Availability Banner */
+.zone-banner-pill {
+  display:inline-flex;align-items:center;gap:8px;
+  padding:8px 14px;border-radius:20px;font-size:13px;font-weight:600;
+  border:1px solid rgba(255,255,255,0.08);
+}
+.zone-banner-ok   {background:rgba(0,200,100,0.12);color:#00c864;}
+.zone-banner-low  {background:rgba(251,191,36,0.12);color:#fbbf24;}
+.zone-banner-full {background:rgba(239,68,68,0.12);color:#ef4444;}
+.zbanner-count {font-size:12px;opacity:0.8;}
+.zbanner-status {font-size:11px;font-weight:700;}
+</style>
+{% endblock %}

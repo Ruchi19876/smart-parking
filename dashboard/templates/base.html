@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Smart Parking Management System Using IoT Sensor Simulation and Data Analytics{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    (function () {
+      var saved = localStorage.getItem('smartpark-theme');
+      if (saved && saved !== 'dark-navy') {
+        document.documentElement.setAttribute('data-theme', saved);
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+{% if session.user_id %}
+<nav class="navbar">
+  <div class="nav-brand">
+    <span class="nav-icon">🅿</span>
+    <span class="nav-title">SmartPark</span>
+    <span class="nav-badge {% if session.role == 'admin' %}badge-admin{% else %}badge-user{% endif %}">
+      {{ session.role | upper }}
+    </span>
+  </div>
+  <div class="nav-links">
+    {% if session.role == 'admin' %}
+      <a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' %}active{% endif %}">
+        <span>📊</span> Dashboard
+      </a>
+      <a href="{{ url_for('admin_analytics') }}" class="nav-link {% if request.endpoint == 'admin_analytics' %}active{% endif %}">
+        <span>📈</span> Analytics
+      </a>
+      <a href="{{ url_for('admin_users') }}" class="nav-link {% if request.endpoint == 'admin_users' %}active{% endif %}">
+        <span>👥</span> Users
+      </a>
+    {% else %}
+      <a href="{{ url_for('user_dashboard') }}" class="nav-link {% if request.endpoint == 'user_dashboard' %}active{% endif %}">
+        <span>🚗</span> My Parking
+      </a>
+    {% endif %}
+    <div class="nav-user">
+      <div class="theme-switcher" id="themeSwitcher">
+        <button type="button" class="theme-switcher-btn" id="themeSwitcherBtn" aria-haspopup="true" aria-expanded="false">
+          <span>🎨</span> Theme
+        </button>
+        <div class="theme-switcher-panel" id="themeSwitcherPanel" role="menu">
+          <button type="button" class="theme-option" data-theme-value="dark-navy" role="menuitem">
+            <span class="theme-swatch" style="background:#0a0f1e"></span> Dark Navy
+          </button>
+          <button type="button" class="theme-option" data-theme-value="midnight-purple" role="menuitem">
+            <span class="theme-swatch" style="background:#0d0a1f"></span> Midnight Purple
+          </button>
+          <button type="button" class="theme-option" data-theme-value="charcoal-slate" role="menuitem">
+            <span class="theme-swatch" style="background:#14161a"></span> Charcoal Slate
+          </button>
+          <button type="button" class="theme-option" data-theme-value="forest-dark" role="menuitem">
+            <span class="theme-swatch" style="background:#0a1712"></span> Forest Dark
+          </button>
+          <button type="button" class="theme-option" data-theme-value="ocean-deep" role="menuitem">
+            <span class="theme-swatch" style="background:#051423"></span> Ocean Deep
+          </button>
+          <button type="button" class="theme-option" data-theme-value="light-clean" role="menuitem">
+            <span class="theme-swatch" style="background:#f4f6f9"></span> Light Clean
+          </button>
+        </div>
+      </div>
+      <span class="user-name">{{ session.name }}</span>
+      <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+    </div>
+  </div>
+</nav>
+{% endif %}
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="flash-container">
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">
+          <span>{{ message }}</span>
+          <button class="flash-close" onclick="this.parentElement.remove()">✕</button>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

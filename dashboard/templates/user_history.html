@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}My Parking History{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">📋 My Parking History</h1>
+    <p class="page-subtitle">All your past parking sessions, bills, and payments</p>
+  </div>
+  <div class="header-actions">
+    <a href="/user/dashboard" style="display:inline-flex;align-items:center;gap:6px;background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;text-decoration:none;">
+      ← Back to Dashboard
+    </a>
+  </div>
+</div>
+
+<!-- Summary Stats -->
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card">
+    <div class="stat-icon">🚗</div>
+    <div class="stat-body">
+      <div class="stat-value">{{ history|length }}</div>
+      <div class="stat-label">Total Sessions</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">💰</div>
+    <div class="stat-body">
+      <div class="stat-value">₹{{ "%.0f"|format(payments|sum(attribute='amount') if payments else 0) }}</div>
+      <div class="stat-label">Total Paid</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">✅</div>
+    <div class="stat-body">
+      <div class="stat-value">{{ payments|length }}</div>
+      <div class="stat-label">Payments Done</div>
+    </div>
+  </div>
+</div>
+
+<!-- History Table -->
+<div class="card">
+  <div class="card-header">
+    <h2>🕐 Session History</h2>
+    <input type="text" id="history-search" placeholder="🔍 Search by plate or zone..." oninput="filterHistory(this.value)"
+      style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:7px 12px;color:#e2e8f0;font-size:13px;width:220px;outline:none;">
+  </div>
+  <div class="table-wrapper">
+    <table class="data-table" id="history-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Vehicle</th>
+          <th>Type</th>
+          <th>Zone / Slot</th>
+          <th>Entry Time</th>
+          <th>Exit Time</th>
+          <th>Duration</th>
+          <th>Amount</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in history %}
+        {% set paid = payments|selectattr('session_id','equalto',h.id)|list %}
+        <tr class="history-row" data-search="{{ h.vehicle_plate|lower }} {{ h.zone_label|lower }}">
+          <td>{{ loop.index }}</td>
+          <td><span class="plate-badge">{{ h.vehicle_plate }}</span></td>
+          <td>{{ h.vehicle_type|replace('_',' ')|title }}</td>
+          <td>{{ h.zone_label or h.zone }} / #{{ h.slot_number }}</td>
+          <td>{{ h.entry_time }}</td>
+          <td>{{ h.exit_time or '—' }}</td>
+          <td>{{ h.duration_display or '—' }}</td>
+          <td>
+            {% if paid %}
+              <strong style="color:#00d4aa;">₹{{ "%.0f"|format(paid[0].amount) }}</strong>
+            {% else %}
+              <span style="color:#64748b;">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if h.status == 'completed' %}
+              <span class="pay-badge pay-done">✅ Completed</span>
+            {% elif h.status == 'active' %}
+              <span class="pay-badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;">🟡 Active</span>
+            {% else %}
+              <span class="pay-badge">{{ h.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if paid %}
+            <button onclick="printBill('{{ h.vehicle_plate }}','{{ h.zone_label or h.zone }}','{{ h.slot_number }}','{{ h.entry_time }}','{{ h.exit_time }}','{{ h.duration_display }}','{{ paid[0].amount }}','{{ paid[0].transaction_id }}','{{ h.vehicle_type }}','{{ paid[0].payment_method }}')"
+              style="background:rgba(0,212,170,0.15);color:#00d4aa;border:1px solid rgba(0,212,170,0.3);border-radius:6px;padding:5px 10px;font-size:12px;font-weight:600;cursor:pointer;">
+              🖨️ Print Bill
+            </button>
+            {% else %}
+              <span style="color:#64748b;font-size:12px;">No bill yet</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty-state">No parking history yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Print Bill Modal -->
+<div id="print-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0f1d2e;border:1px solid rgba(0,212,170,0.3);border-radius:16px;padding:32px;max-width:420px;width:90%;max-height:85vh;overflow-y:auto;position:relative;">
+    <button onclick="closePrintModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;">✕</button>
+    <div id="bill-print-area">
+      <div style="text-align:center;margin-bottom:20px;">
+        <div style="font-size:28px;">🅿️</div>
+        <h2 style="color:#00d4aa;margin:4px 0;">Smart Parking Management</h2>
+        <p style="color:#64748b;font-size:12px;margin:0;">Official Parking Receipt</p>
+        <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;">
+      </div>
+      <table style="width:100%;font-size:14px;border-collapse:collapse;" id="bill-detail-table">
+      </table>
+      <hr style="border-color:rgba(255,255,255,0.1);margin:12px 0;">
+      <div style="text-align:center;color:#64748b;font-size:11px;">
+        Thank you for using Smart Parking Management!
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;position:sticky;bottom:0;background:#0f1d2e;padding-top:8px;">
+      <button onclick="doPrint()" style="background:#00d4aa;color:#0a0f1a;border:none;border-radius:8px;padding:10px 24px;font-weight:700;font-size:14px;cursor:pointer;">🖨️ Print</button>
+      <button onclick="closePrintModal()" style="background:rgba(255,255,255,0.05);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 24px;font-size:14px;cursor:pointer;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Filter history table
+function filterHistory(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.history-row').forEach(row => {
+    row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+
+// Print Bill
+function printBill(plate, zone, slot, entry, exit, duration, amount, txn, vtype, method) {
+  const modeLabels={upi:'UPI', debit_card:'Debit Card', credit_card:'Credit Card', cash:'Cash'};
+  const modeLabel = modeLabels[method] || (method ? method.toUpperCase() : 'UPI');
+  const rows = [
+    ['Vehicle Plate', plate],
+    ['Vehicle Type', vtype.replace(/_/g,' ')],
+    ['Zone / Slot', zone + ' / #' + slot],
+    ['Entry Time', entry],
+    ['Exit Time', exit],
+    ['Duration', duration],
+    ['Amount Paid', 'Rs.' + parseFloat(amount).toFixed(0)],
+    ['Transaction ID', txn],
+    ['Payment Mode', modeLabel],
+    ['Date', new Date().toLocaleDateString('en-IN')],
+  ];
+  let html = '';
+  rows.forEach(([label, val]) => {
+    html += `<tr>
+      <td style="padding:7px 0;color:#94a3b8;width:45%;">${label}</td>
+      <td style="padding:7px 0;color:#e2e8f0;font-weight:600;">${val}</td>
+    </tr>`;
+  });
+  document.getElementById('bill-detail-table').innerHTML = html;
+  const modal = document.getElementById('print-modal');
+  modal.style.display = 'flex';
+}
+
+function closePrintModal() {
+  document.getElementById('print-modal').style.display = 'none';
+}
+
+function doPrint() {
+  const content = document.getElementById('bill-print-area').innerHTML;
+  const win = window.open('', '_blank', 'width=480,height=600');
+  win.document.write(`
+    <html><head><title>Parking Bill</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #fff; color: #000; padding: 30px; }
+      h2 { color: #00897b; }
+      table { width: 100%; border-collapse: collapse; }
+      td { padding: 8px 4px; border-bottom: 1px solid #eee; font-size: 14px; }
+      hr { border-color: #ddd; }
+    </style></head>
+    <body>${content}</body></html>
+  `);
+  win.document.close();
+  win.print();
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Parking Management System Using IoT Sensor Simulation and Data Analytics</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #070e1c;
+      color: #e2e8f0;
+      min-height: 100vh;
+      overflow-y: auto;         /* always scrollable */
+    }
+
+    /* ── Animated background ── */
+    .bg-anim {
+      position: fixed; inset: 0; z-index: 0;
+      overflow: hidden; pointer-events: none;
+    }
+    .bg-anim span {
+      position: absolute; display: block; border-radius: 50%;
+      animation: floatUp linear infinite; opacity: 0;
+    }
+    @keyframes floatUp {
+      0%   { transform: translateY(100vh) scale(0); opacity: 0; }
+      10%  { opacity: .5; }
+      90%  { opacity: .15; }
+      100% { transform: translateY(-20vh) scale(1.2); opacity: 0; }
+    }
+
+    /* ── Flash messages ── */
+    .flash-container {
+      position: fixed; top: 14px; right: 16px;
+      z-index: 500; display: flex; flex-direction: column; gap: 7px;
+    }
+    .flash {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px; border-radius: 8px; font-size: 13px;
+      font-weight: 500; min-width: 260px;
+    }
+    .flash-close { margin-left: auto; background: none; border: none;
+                   cursor: pointer; color: inherit; opacity: .7; font-size: 14px; }
+    .flash-success { background: #052e16; color: #10b981; border: 1px solid rgba(16,185,129,.4); }
+    .flash-danger  { background: #1f0a0a; color: #ef4444; border: 1px solid rgba(239,68,68,.4); }
+    .flash-warning { background: #1c1002; color: #f59e0b; border: 1px solid rgba(245,158,11,.4); }
+    .flash-info    { background: #0d1a2e; color: #00d4aa; border: 1px solid rgba(0,212,170,.4); }
+
+    /* ── Page wrapper ── */
+    .login-page {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 32px;
+      min-height: 100vh;
+    }
+
+    /* ── Brand header ── */
+    .login-topbar {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 8px; text-align: center;
+    }
+    .login-logo {
+      font-size: 38px;
+      filter: drop-shadow(0 0 18px rgba(0,212,170,.6));
+      animation: logoPulse 3s ease-in-out infinite;
+    }
+    @keyframes logoPulse {
+      0%,100% { filter: drop-shadow(0 0 18px rgba(0,212,170,.5)); }
+      50%      { filter: drop-shadow(0 0 36px rgba(0,212,170,.9)); }
+    }
+    .brand-name {
+      font-size: 30px; font-weight: 800; letter-spacing: -1px;
+      background: linear-gradient(135deg, #00d4aa, #4f9ef8);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .brand-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+    /* ── Tagline ── */
+    .login-tagline {
+      font-size: 12px; color: #64748b; margin-bottom: 10px; text-align: center;
+    }
+
+    /* ── Vehicle strip ── */
+    .vehicle-strip {
+      display: flex; justify-content: center; gap: 14px;
+      flex-wrap: wrap; margin-bottom: 18px;
+    }
+    .vstrip-item {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      font-size: 9px; color: #64748b; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    .vstrip-item .vi { font-size: 22px; }
+    .vstrip-item.tw .vi { color: #06b6d4; }
+    .vstrip-item.fw .vi { color: #10b981; }
+    .vstrip-item.ev .vi { color: #8b5cf6; }
+    .vstrip-item.hv .vi { color: #f59e0b; }
+
+    /* ── Two cards side by side ── */
+    .login-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      width: 100%;
+      max-width: 820px;
+      margin-bottom: 18px;
+    }
+    @media(max-width: 640px) {
+      .login-cards { grid-template-columns: 1fr; }
+    }
+
+    /* ── Card base ── */
+    .login-card {
+      background: rgba(15,29,46,.95);
+      border-radius: 14px;
+      padding: 22px 20px;
+      border: 1px solid rgba(30,45,69,.8);
+      backdrop-filter: blur(12px);
+      transition: box-shadow .3s;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-admin {
+      border-top: 3px solid #00d4aa;
+      box-shadow: 0 0 28px rgba(0,212,170,.07);
+    }
+    .card-admin:hover { box-shadow: 0 6px 36px rgba(0,212,170,.14); }
+
+    .card-user {
+      border-top: 3px solid #6366f1;
+      box-shadow: 0 0 28px rgba(99,102,241,.07);
+    }
+    .card-user:hover { box-shadow: 0 6px 36px rgba(99,102,241,.14); }
+
+    .card-icon     { font-size: 30px; margin-bottom: 6px; display: block; }
+    .card-title    { font-size: 18px; font-weight: 700; margin-bottom: 3px; }
+    .card-admin .card-title { color: #00d4aa; }
+    .card-user  .card-title { color: #818cf8; }
+    .card-subtitle { font-size: 11px; color: #64748b; margin-bottom: 16px; line-height: 1.5; }
+
+    /* ── Form groups ── */
+    .form-group { margin-bottom: 12px; }
+    .form-group label {
+      display: block; font-size: 10px; font-weight: 600;
+      color: #94a3b8; text-transform: uppercase;
+      letter-spacing: .4px; margin-bottom: 5px;
+    }
+    .input-wrap { position: relative; display: flex; align-items: center; }
+    .input-wrap .ico {
+      position: absolute; left: 10px; font-size: 13px; pointer-events: none;
+    }
+    .input-wrap input {
+      width: 100%; padding: 9px 10px 9px 32px;
+      background: rgba(10,15,30,.85);
+      border: 1px solid #1e2d45; border-radius: 7px;
+      color: #e2e8f0; font-size: 13px;
+      font-family: 'Inter', sans-serif; transition: .2s;
+    }
+    .input-wrap input:focus {
+      outline: none; border-color: #00d4aa;
+      box-shadow: 0 0 0 3px rgba(0,212,170,.1);
+    }
+    .card-user .input-wrap input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,.1);
+    }
+    .input-wrap input::placeholder { color: #3d5068; }
+    .tpw {
+      position: absolute; right: 9px;
+      background: none; border: none;
+      cursor: pointer; font-size: 13px; opacity: .5;
+    }
+    .tpw:hover { opacity: 1; }
+
+    /* ── Buttons — always visible ── */
+    .btn-admin-login {
+      width: 100%; padding: 11px;
+      border-radius: 8px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #00d4aa, #0891b2);
+      color: #000; font-size: 14px; font-weight: 700;
+      transition: .2s; margin-top: 6px;
+      display: block;   /* ensure visible */
+    }
+    .btn-admin-login:hover {
+      box-shadow: 0 4px 18px rgba(0,212,170,.45);
+    }
+
+    .btn-user-login {
+      width: 100%; padding: 11px;
+      border-radius: 8px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff; font-size: 14px; font-weight: 700;
+      transition: .2s; margin-top: 6px;
+      display: block;   /* ensure visible */
+    }
+    .btn-user-login:hover {
+      box-shadow: 0 4px 18px rgba(99,102,241,.45);
+    }
+
+    /* ── Card footer ── */
+    .card-footer {
+      margin-top: 12px; font-size: 12px;
+      color: #64748b; text-align: center;
+    }
+    .card-footer a { color: #00d4aa; }
+    .card-user .card-footer a { color: #818cf8; }
+    .forgot-pw-link { margin-top: 6px !important; }
+    .forgot-pw-link a { font-size: 11px; opacity: .85; }
+    .forgot-pw-link a:hover { opacity: 1; text-decoration: underline; }
+
+    .demo-hint {
+      margin-top: 10px; padding: 8px 12px;
+      background: rgba(0,212,170,.07);
+      border: 1px solid rgba(0,212,170,.2);
+      border-radius: 7px; font-size: 11px;
+      color: #64748b; text-align: center;
+    }
+    .demo-hint code { color: #00d4aa; font-size: 11px; background: none; padding: 0; }
+
+    /* ── Feature badges ── */
+    .login-features {
+      display: flex; justify-content: center;
+      gap: 8px; flex-wrap: wrap;
+    }
+    .feat-badge {
+      font-size: 10px; padding: 4px 10px; border-radius: 20px;
+      background: rgba(15,29,46,.8);
+      border: 1px solid #1e2d45; color: #64748b; font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Animated background -->
+<div class="bg-anim" id="bgAnim"></div>
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flash-container">
+    {% for category, message in messages %}
+    <div class="flash flash-{{ category }}">
+      <span>{{ message }}</span>
+      <button class="flash-close" onclick="this.parentElement.remove()">✕</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
+
+<div class="login-page">
+
+  <!-- Brand -->
+  <div class="login-topbar">
+    <div>
+      <div class="brand-name" style="font-size:20px;line-height:1.3;">Smart Parking Management System Using IoT Sensor Simulation and Data Analytics</div>
+    </div>
+  </div>
+
+  <div class="login-tagline">
+    Real-time monitoring · 36 slots · 4 dedicated zones · Live sensor data
+  </div>
+
+  <!-- Vehicle strip -->
+  <div class="vehicle-strip">
+    <div class="vstrip-item tw"><span class="vi">🏍</span>Bike</div>
+    <div class="vstrip-item tw"><span class="vi">🛵</span>Scooter</div>
+    <div class="vstrip-item fw"><span class="vi">🚗</span>Car</div>
+    <div class="vstrip-item fw"><span class="vi">🛺</span>Auto</div>
+    <div class="vstrip-item ev"><span class="vi">🔋</span>EV Car</div>
+    <div class="vstrip-item hv"><span class="vi">🚛</span>Heavy</div>
+  </div>
+
+  <!-- Two Login Cards -->
+  <div class="login-cards">
+
+    <!-- ADMIN CARD -->
+    <div class="login-card card-admin">
+      <span class="card-icon">🔐</span>
+      <div class="card-title">Admin Login</div>
+      <div class="card-subtitle">Full system control · All zones · Analytics · User management</div>
+
+      <form method="POST" action="{{ url_for('login') }}">
+        <input type="hidden" name="login_type" value="admin">
+        <div class="form-group">
+          <label>Admin Email</label>
+          <div class="input-wrap">
+            <span class="ico">✉</span>
+            <input type="email" name="email" placeholder="admin@parking.com"
+                   required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="input-wrap">
+            <span class="ico">🔒</span>
+            <input type="password" id="apw" name="password"
+                   placeholder="Admin password" required>
+            <button type="button" class="tpw" onclick="tog('apw')">👁</button>
+          </div>
+        </div>
+        <button type="submit" class="btn-admin-login">
+          🔐 Login as Admin →
+        </button>
+      </form>
+
+      <div class="card-footer">
+        <div class="demo-hint">
+          🔑 Default: <code>admin@parking.com / Admin@1234</code>
+        </div>
+      </div>
+    </div>
+
+    <!-- USER CARD -->
+    <div class="login-card card-user">
+      <span class="card-icon">👤</span>
+      <div class="card-title">User Login</div>
+      <div class="card-subtitle">View slots · Book parking · Track sessions · Pay bills</div>
+
+      <form method="POST" action="{{ url_for('login') }}">
+        <input type="hidden" name="login_type" value="user">
+        <div class="form-group">
+          <label>Your Email</label>
+          <div class="input-wrap">
+            <span class="ico">✉</span>
+            <input type="email" name="email" placeholder="you@email.com"
+                   required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="input-wrap">
+            <span class="ico">🔒</span>
+            <input type="password" id="upw" name="password"
+                   placeholder="Your password" required>
+            <button type="button" class="tpw" onclick="tog('upw')">👁</button>
+          </div>
+        </div>
+        <button type="submit" class="btn-user-login">
+          👤 Login as User →
+        </button>
+      </form>
+
+      <div class="card-footer">
+        <p>New user? <a href="{{ url_for('register') }}">Register here →</a></p>
+        <p class="forgot-pw-link"><a href="{{ url_for('forgot_password') }}">🔑 Forgot Password?</a></p>
+      </div>
+    </div>
+
+  </div><!-- end login-cards -->
+
+  <!-- Feature badges -->
+  <div class="login-features">
+    <span class="feat-badge">📡 IoT Sensors</span>
+    <span class="feat-badge">🗺 4 Zones</span>
+    <span class="feat-badge">📊 Live Analytics</span>
+    <span class="feat-badge">💳 Auto Billing</span>
+    <span class="feat-badge">🔐 Role-Based Access</span>
+    <span class="feat-badge">⚡ Real-Time Dashboard</span>
+  </div>
+
+</div><!-- end login-page -->
+
+<script>
+function tog(id) {
+  const i = document.getElementById(id);
+  i.type = i.type === 'password' ? 'text' : 'password';
+}
+setTimeout(() => document.querySelectorAll('.flash').forEach(e => e.remove()), 4000);
+
+// Animated background particles
+const bg = document.getElementById('bgAnim');
+const colors = ['rgba(0,212,170,.4)','rgba(99,102,241,.3)',
+                 'rgba(6,182,212,.3)','#10b981','#8b5cf6','#f59e0b'];
+for (let i = 0; i < 25; i++) {
+  const s = document.createElement('span');
+  const size = Math.random() * 8 + 3;
+  s.style.cssText = `
+    width:${size}px; height:${size}px;
+    left:${Math.random()*100}%;
+    background:${colors[Math.floor(Math.random()*colors.length)]};
+    animation-duration:${Math.random()*14+8}s;
+    animation-delay:${Math.random()*10}s;
+  `;
+  bg.appendChild(s);
+}
+</script>
+</body>
+</html>
